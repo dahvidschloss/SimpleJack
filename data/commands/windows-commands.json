@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "id": "dir",
+      "name": "dir",
+      "synopsis": "List directory contents (Windows)",
+      "targets": ["windows"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [{ "name": "path", "type": "string", "default": ".", "required": false }],
+      "preview": "cmd.exe /c dir \"{{path}}\"",
+      "parser": { "type": "file_list", "shape": ["attr", "size", "mtime", "name"] },
+      "help": "Windows directory listing normalized for the explorer."
+    },
+    {
+      "id": "whoami",
+      "name": "whoami",
+      "synopsis": "Display current username",
+      "targets": ["windows"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [],
+      "preview": "whoami",
+      "parser": { "type": "text" },
+      "help": "Returns the current user account name."
+    },
+    {
+      "id": "tasklist",
+      "name": "tasklist",
+      "synopsis": "Display running processes",
+      "targets": ["windows"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [{ "name": "verbose", "type": "boolean", "default": false, "flag": "/v" }],
+      "preview": "tasklist {{#if verbose}}/v{{/if}}",
+      "parser": { "type": "process_list" },
+      "help": "Lists all running processes on the system."
+    },
+    {
+      "id": "netstat",
+      "name": "netstat",
+      "synopsis": "Display network connections",
+      "targets": ["windows"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [
+        { "name": "all", "type": "boolean", "default": false, "flag": "-a" },
+        { "name": "numeric", "type": "boolean", "default": false, "flag": "-n" }
+      ],
+      "preview": "netstat {{#if all}}-a{{/if}}{{#if numeric}}n{{/if}}",
+      "parser": { "type": "network_list" },
+      "help": "Shows network connections and listening ports."
+    },
+    {
+      "id": "ipconfig",
+      "name": "ipconfig",
+      "synopsis": "Display IP configuration",
+      "targets": ["windows"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [{ "name": "all", "type": "boolean", "default": false, "flag": "/all" }],
+      "preview": "ipconfig {{#if all}}/all{{/if}}",
+      "parser": { "type": "network_config" },
+      "help": "Display Windows IP configuration information."
+    }
+  ]
+}

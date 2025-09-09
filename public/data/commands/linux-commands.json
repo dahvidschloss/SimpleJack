@@ -1,0 +1,202 @@
+{
+  "version": "1.0.0",
+  "commands": [
+    {
+      "id": "help",
+      "name": "help",
+      "synopsis": "Show available commands",
+      "targets": ["linux", "windows", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [],
+      "preview": "help",
+      "parser": {
+        "type": "text"
+      },
+      "help": "Displays all available commands and their usage."
+    },
+    {
+      "id": "ls",
+      "name": "ls",
+      "synopsis": "List directory contents",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": ".",
+          "required": false,
+          "flag": ""
+        },
+        {
+          "name": "all",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "flag": "-a"
+        },
+        {
+          "name": "long",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "flag": "-l"
+        }
+      ],
+      "preview": "ls [path] [-a] [-l]",
+      "parser": {
+        "type": "table",
+        "shape": ["permissions", "links", "owner", "group", "size", "date", "name"]
+      },
+      "help": "List directory contents with optional detailed view and hidden files."
+    },
+    {
+      "id": "pwd",
+      "name": "pwd",
+      "synopsis": "Print working directory",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [],
+      "preview": "pwd",
+      "parser": {
+        "type": "text"
+      },
+      "help": "Display the current working directory path."
+    },
+    {
+      "id": "whoami",
+      "name": "whoami",
+      "synopsis": "Display current username",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [],
+      "preview": "whoami",
+      "parser": {
+        "type": "text"
+      },
+      "help": "Display the username of the current user."
+    },
+    {
+      "id": "ps",
+      "name": "ps",
+      "synopsis": "Display running processes",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [
+        {
+          "name": "all",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "flag": "aux"
+        }
+      ],
+      "preview": "ps [aux]",
+      "parser": {
+        "type": "table",
+        "shape": ["user", "pid", "cpu", "mem", "vsz", "rss", "tty", "stat", "start", "time", "command"]
+      },
+      "help": "Display information about running processes."
+    },
+    {
+      "id": "cat",
+      "name": "cat",
+      "synopsis": "Display file contents",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [
+        {
+          "name": "file",
+          "type": "string",
+          "required": true,
+          "flag": ""
+        }
+      ],
+      "preview": "cat <file>",
+      "parser": {
+        "type": "text"
+      },
+      "help": "Display the contents of a file."
+    },
+    {
+      "id": "ifconfig",
+      "name": "ifconfig",
+      "synopsis": "Configure network interface",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [
+        {
+          "name": "interface",
+          "type": "string",
+          "required": false,
+          "flag": ""
+        }
+      ],
+      "preview": "ifconfig [interface]",
+      "parser": {
+        "type": "text"
+      },
+      "help": "Display or configure network interface parameters."
+    },
+    {
+      "id": "netstat",
+      "name": "netstat",
+      "synopsis": "Display network connections",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": {
+        "writes_disk": false,
+        "noisy": false
+      },
+      "params": [
+        {
+          "name": "all",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "flag": "-a"
+        },
+        {
+          "name": "numeric",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "flag": "-n"
+        }
+      ],
+      "preview": "netstat [-a] [-n]",
+      "parser": {
+        "type": "table"
+      },
+      "help": "Display network connections, routing tables, and interface statistics."
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "id": "ls",
+      "name": "ls",
+      "synopsis": "List directory contents",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [
+        { "name": "path", "type": "string", "default": ".", "required": false },
+        { "name": "all", "type": "boolean", "default": false, "flag": "-a" },
+        { "name": "long", "type": "boolean", "default": false, "flag": "-l" }
+      ],
+      "preview": "ls {{#if long}}-l{{/if}}{{#if all}}a{{/if}} '{{path}}'",
+      "parser": { "type": "file_list", "shape": ["mode", "links", "owner", "group", "size", "mtime", "name"] },
+      "help": "Lists files and directories; drives the file explorer."
+    },
+    {
+      "id": "pwd",
+      "name": "pwd",
+      "synopsis": "Print working directory",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [],
+      "preview": "pwd",
+      "parser": { "type": "text" },
+      "help": "Shows the current working directory path."
+    },
+    {
+      "id": "whoami",
+      "name": "whoami",
+      "synopsis": "Display current username",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [],
+      "preview": "whoami",
+      "parser": { "type": "text" },
+      "help": "Returns the username of the current user."
+    },
+    {
+      "id": "ps",
+      "name": "ps",
+      "synopsis": "Show running processes",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [{ "name": "all", "type": "boolean", "default": false, "flag": "aux" }],
+      "preview": "ps {{#if all}}aux{{/if}}",
+      "parser": { "type": "process_list" },
+      "help": "Lists currently running processes."
+    },
+    {
+      "id": "netstat",
+      "name": "netstat",
+      "synopsis": "Display network connections",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [
+        { "name": "tcp", "type": "boolean", "default": false, "flag": "-t" },
+        { "name": "udp", "type": "boolean", "default": false, "flag": "-u" },
+        { "name": "listening", "type": "boolean", "default": false, "flag": "-l" },
+        { "name": "processes", "type": "boolean", "default": false, "flag": "-p" },
+        { "name": "numeric", "type": "boolean", "default": false, "flag": "-n" }
+      ],
+      "preview": "netstat {{#if tcp}}-t{{/if}}{{#if udp}}u{{/if}}{{#if listening}}l{{/if}}{{#if processes}}p{{/if}}{{#if numeric}}n{{/if}}",
+      "parser": { "type": "network_list" },
+      "help": "Shows network connections and listening ports."
+    },
+    {
+      "id": "ifconfig",
+      "name": "ifconfig",
+      "synopsis": "Configure network interface",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [{ "name": "interface", "type": "string", "required": false }],
+      "preview": "ifconfig {{interface}}",
+      "parser": { "type": "network_config" },
+      "help": "Display or configure network interface parameters."
+    },
+    {
+      "id": "cat",
+      "name": "cat",
+      "synopsis": "Display file contents",
+      "targets": ["linux", "macos"],
+      "min_integrity": "user",
+      "opsec": { "writes_disk": false, "noisy": false },
+      "params": [{ "name": "filename", "type": "string", "required": true }],
+      "preview": "cat '{{filename}}'",
+      "parser": { "type": "text" },
+      "help": "Displays the contents of a file."
+    }
+  ]
+}

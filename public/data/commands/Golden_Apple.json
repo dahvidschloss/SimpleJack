@@ -1,0 +1,161 @@
+{
+  "commands": [
+    {
+      "id": "ls",
+      "name": "ls",
+      "synopsis": "List directory contents",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": ".",
+          "required": false,
+          "description": "Directory path to list"
+        },
+        {
+          "name": "la",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Show all files including hidden"
+        }
+      ],
+      "preview": "ls [path] [-la]",
+      "parser": "generic",
+      "help": "Lists directory contents on macOS systems."
+    },
+    {
+      "id": "ps",
+      "name": "ps",
+      "synopsis": "List running processes",
+      "min_integrity": "low",
+      "opsec": "medium",
+      "parameters": [
+        {
+          "name": "aux",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Show all processes with detailed info"
+        }
+      ],
+      "preview": "ps [-aux]",
+      "parser": "generic",
+      "help": "Lists currently running processes on macOS."
+    },
+    {
+      "id": "launchctl",
+      "name": "launchctl",
+      "synopsis": "Control launchd services",
+      "min_integrity": "medium",
+      "opsec": "high",
+      "parameters": [
+        {
+          "name": "action",
+          "type": "string",
+          "default": "list",
+          "required": false,
+          "description": "Action to perform (load, unload, list, etc.)"
+        },
+        {
+          "name": "service",
+          "type": "string",
+          "default": "",
+          "required": false,
+          "description": "Service plist file"
+        }
+      ],
+      "preview": "launchctl [action] [service]",
+      "parser": "generic",
+      "help": "Controls macOS launchd services and daemons."
+    },
+    {
+      "id": "dscl",
+      "name": "dscl",
+      "synopsis": "Directory Service command line utility",
+      "min_integrity": "medium",
+      "opsec": "high",
+      "parameters": [
+        {
+          "name": "datasource",
+          "type": "string",
+          "default": ".",
+          "required": false,
+          "description": "Directory service data source"
+        },
+        {
+          "name": "command",
+          "type": "string",
+          "default": "list",
+          "required": false,
+          "description": "Command to execute"
+        }
+      ],
+      "preview": "dscl [datasource] [command]",
+      "parser": "generic",
+      "help": "Interacts with macOS Directory Services for user and group management."
+    },
+    {
+      "id": "security",
+      "name": "security",
+      "synopsis": "Security framework command line tool",
+      "min_integrity": "medium",
+      "opsec": "high",
+      "parameters": [
+        {
+          "name": "command",
+          "type": "string",
+          "default": "list-keychains",
+          "required": false,
+          "description": "Security command to execute"
+        }
+      ],
+      "preview": "security [command]",
+      "parser": "generic",
+      "help": "Manages keychains, certificates, and security policies on macOS."
+    },
+    {
+      "id": "load",
+      "name": "load",
+      "synopsis": "Load new capabilities into the agent",
+      "min_integrity": "medium",
+      "opsec": "medium",
+      "parameters": [
+        {
+          "name": "capability",
+          "type": "string",
+          "default": "",
+          "required": true,
+          "description": "Name of the capability to load (e.g., Token_Impersonation, Cred_Harvesting)"
+        }
+      ],
+      "preview": "load <capability>",
+      "parser": "generic",
+      "help": "Loads a new capability module into the agent. Available capabilities include Token_Impersonation, Cred_Harvesting, Process_Injection, and others."
+    },
+    {
+      "id": "capes",
+      "name": "capes",
+      "synopsis": "Show loaded capabilities",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "capes",
+      "parser": "generic",
+      "help": "Displays all capabilities currently loaded into the agent. Default capabilities include Loader, Console Execution, and Exit/Eat."
+    },
+    {
+      "id": "agent_info",
+      "name": "agent_info",
+      "synopsis": "Display detailed agent information",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "agent_info",
+      "parser": "generic",
+      "help": "Shows comprehensive information about the agent including status, configuration, capabilities, and system details."
+    }
+  ]
+}

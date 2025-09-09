@@ -1,0 +1,199 @@
+{
+  "commands": [
+    {
+      "id": "ls",
+      "name": "ls",
+      "synopsis": "List directory contents",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": ".",
+          "required": false,
+          "description": "Directory path to list"
+        },
+        {
+          "name": "all",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Show hidden files"
+        }
+      ],
+      "preview": "ls [path] [-a]",
+      "parser": "generic",
+      "help": "Lists the contents of the specified directory. Use -a to show hidden files."
+    },
+    {
+      "id": "dir",
+      "name": "dir",
+      "synopsis": "List directory contents (Windows)",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": ".",
+          "required": false,
+          "description": "Directory path to list"
+        }
+      ],
+      "preview": "dir [path]",
+      "parser": "generic",
+      "help": "Lists the contents of the specified directory on Windows systems."
+    },
+    {
+      "id": "pwd",
+      "name": "pwd",
+      "synopsis": "Print working directory",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "pwd",
+      "parser": "generic",
+      "help": "Displays the current working directory path."
+    },
+    {
+      "id": "whoami",
+      "name": "whoami",
+      "synopsis": "Display current user",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "whoami",
+      "parser": "generic",
+      "help": "Shows the username of the currently logged-in user."
+    },
+    {
+      "id": "ps",
+      "name": "ps",
+      "synopsis": "List running processes",
+      "min_integrity": "low",
+      "opsec": "medium",
+      "parameters": [
+        {
+          "name": "aux",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Show all processes with detailed info"
+        }
+      ],
+      "preview": "ps [-aux]",
+      "parser": "generic",
+      "help": "Lists currently running processes. Use -aux for detailed information."
+    },
+    {
+      "id": "tasklist",
+      "name": "tasklist",
+      "synopsis": "List running processes (Windows)",
+      "min_integrity": "low",
+      "opsec": "medium",
+      "parameters": [],
+      "preview": "tasklist",
+      "parser": "generic",
+      "help": "Lists all running processes on Windows systems."
+    },
+    {
+      "id": "netstat",
+      "name": "netstat",
+      "synopsis": "Display network connections",
+      "min_integrity": "low",
+      "opsec": "medium",
+      "parameters": [
+        {
+          "name": "an",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Show all connections and listening ports"
+        }
+      ],
+      "preview": "netstat [-an]",
+      "parser": "generic",
+      "help": "Displays active network connections and listening ports."
+    },
+    {
+      "id": "ifconfig",
+      "name": "ifconfig",
+      "synopsis": "Display network interface configuration",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "interface",
+          "type": "string",
+          "default": "",
+          "required": false,
+          "description": "Specific interface to display"
+        }
+      ],
+      "preview": "ifconfig [interface]",
+      "parser": "generic",
+      "help": "Shows network interface configuration and IP addresses."
+    },
+    {
+      "id": "ipconfig",
+      "name": "ipconfig",
+      "synopsis": "Display IP configuration (Windows)",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "all",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Show detailed configuration"
+        }
+      ],
+      "preview": "ipconfig [/all]",
+      "parser": "generic",
+      "help": "Displays IP configuration for all network adapters on Windows."
+    },
+    {
+      "id": "load",
+      "name": "load",
+      "synopsis": "Load new capabilities into the agent",
+      "min_integrity": "medium",
+      "opsec": "medium",
+      "parameters": [
+        {
+          "name": "capability",
+          "type": "string",
+          "default": "",
+          "required": true,
+          "description": "Name of the capability to load (e.g., Token_Impersonation, Cred_Harvesting)"
+        }
+      ],
+      "preview": "load <capability>",
+      "parser": "generic",
+      "help": "Loads a new capability module into the agent. Available capabilities include Token_Impersonation, Cred_Harvesting, Process_Injection, and others."
+    },
+    {
+      "id": "capes",
+      "name": "capes",
+      "synopsis": "Show loaded capabilities",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "capes",
+      "parser": "generic",
+      "help": "Displays all capabilities currently loaded into the agent. Default capabilities include Loader, Console Execution, and Exit/Eat."
+    },
+    {
+      "id": "agent_info",
+      "name": "agent_info",
+      "synopsis": "Display detailed agent information",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "agent_info",
+      "parser": "generic",
+      "help": "Shows comprehensive information about the agent including status, configuration, capabilities, and system details."
+    }
+  ]
+}

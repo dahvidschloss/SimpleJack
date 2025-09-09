@@ -1,0 +1,44 @@
+{
+  "classifications": {
+    "CrowdStrike": {
+      "status": "danger",
+      "color": "red",
+      "description": "Advanced EDR with behavioral analysis"
+    },
+    "Sentinel One": {
+      "status": "danger",
+      "color": "red",
+      "description": "AI-powered endpoint protection"
+    },
+    "Huntress": {
+      "status": "danger",
+      "color": "red",
+      "description": "Managed threat hunting platform"
+    },
+    "McAfee": {
+      "status": "good",
+      "color": "green",
+      "description": "Traditional antivirus solution"
+    },
+    "Trend Micro": {
+      "status": "good",
+      "color": "green",
+      "description": "Enterprise security platform"
+    },
+    "Windows Defender": {
+      "status": "warning",
+      "color": "yellow",
+      "description": "Built-in Windows protection"
+    },
+    "XProtect": {
+      "status": "good",
+      "color": "green",
+      "description": "Built-in macOS protection"
+    },
+    "ClamAV": {
+      "status": "good",
+      "color": "green",
+      "description": "Open source antivirus"
+    
+  }
+}
