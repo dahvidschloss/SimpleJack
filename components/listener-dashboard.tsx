@@ -28,6 +28,7 @@ interface ListenerDashboardProps {
   listeners: Listener[]
   onListenerStatusUpdate: (listenerId: string, status: Listener["status"]) => void
   onNewListener: () => void // Added callback for new listener wizard
+  onListenerDelete?: (listenerId: string) => void
 }
 
 export function ListenerDashboard({
@@ -36,6 +37,7 @@ export function ListenerDashboard({
   listeners,
   onListenerStatusUpdate,
   onNewListener, // Added onNewListener prop
+  onListenerDelete,
 }: ListenerDashboardProps) {
   const [searchTerm, setSearchTerm] = useState("")
 
@@ -189,7 +191,15 @@ export function ListenerDashboard({
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={(e) => handlePlayPause(e, listener)}>
                   {listener.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
                 </Button>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onListenerDelete?.(listener.id)
+                  }}
+                >
                   <Trash2 className="h-3 w-3" />
                 </Button>
               </div>

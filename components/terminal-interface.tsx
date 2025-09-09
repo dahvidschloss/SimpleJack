@@ -257,6 +257,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
   const terminalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [edrClassifications, setEdrClassifications] = useState<any>(null)
+  const [seenApiCommandIds, setSeenApiCommandIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetch("/data/edr-classifications.json")
@@ -268,6 +269,29 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
   const getCurrentAgent = (): Agent | null => {
     return agents.find((agent) => agent.id === selectedAgent) || null
   }
+
+  // Listen for command results from page-level SSE (singleton); update terminal only on new results
+  useEffect(() => {
+    setSeenApiCommandIds(new Set())
+    if (!selectedAgent) return
+    const onResult = (ev: any) => {
+      try {
+        const cmd = ev.detail
+        if (!cmd || cmd.agent_id !== selectedAgent) return
+        const id: string = String(cmd.id || `${cmd.command}-${cmd.time_tasked}`)
+        if (seenApiCommandIds.has(id)) return
+        const newSeen = new Set(seenApiCommandIds)
+        newSeen.add(id)
+        setSeenApiCommandIds(newSeen)
+        const time = new Date(cmd.time_completed || cmd.time_tasked || Date.now()).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        const commandLine: TerminalLine = { id: `${id}-cmd`, type: 'command', content: `${cmd.command}${cmd.command_args ? ' ' + cmd.command_args : ''}`, timestamp: time }
+        const resultLine: TerminalLine = { id: `${id}-out`, type: cmd.success ? 'output' : 'error', content: cmd.success ? (cmd.command_result || 'OK') : (cmd.error || 'Error'), timestamp: time }
+        setHistory((prev) => [...prev, commandLine, resultLine])
+      } catch {}
+    }
+    window.addEventListener('command:result', onResult as any)
+    return () => window.removeEventListener('command:result', onResult as any)
+  }, [selectedAgent, seenApiCommandIds])
 
   useEffect(() => {
     if (selectedAgent) {
@@ -496,6 +520,60 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       command_args: args.join(" "),
       command_result: "",
       error: undefined,
+    }
+
+    if (baseCommand === "remove") {
+      const commandLine: TerminalLine = {
+        id: Date.now().toString(),
+        type: "command",
+        content: `$ ${command}`,
+        timestamp: new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      }
+      const current = getCurrentAgent()
+      const arg = (args[0] || "").toLowerCase()
+      if (!current || !arg || !current.id.toLowerCase().startsWith(arg)) {
+        const out: TerminalLine = {
+          id: (Date.now() + 1).toString(),
+          type: "error",
+          content: `Usage: remove <first8-of-agent-id>. Selected agent: ${current?.id || 'none'}`,
+          timestamp: commandLine.timestamp,
+        }
+        setHistory((prev) => [...prev, commandLine, out])
+        setCommand("")
+        return
+      }
+      try {
+        const res = await fetch(`/api/agents/${current.id}`, { method: 'DELETE' })
+        if (res.ok) {
+          const out: TerminalLine = {
+            id: (Date.now() + 1).toString(),
+            type: "output",
+            content: `Agent ${current.id} removed`,
+            timestamp: commandLine.timestamp,
+          }
+          setHistory((prev) => [...prev, commandLine, out])
+          // notify page to refresh agents
+          window.dispatchEvent(new CustomEvent('agents:refresh'))
+        } else {
+          const out: TerminalLine = {
+            id: (Date.now() + 1).toString(),
+            type: "error",
+            content: `Failed to remove agent ${current.id}`,
+            timestamp: commandLine.timestamp,
+          }
+          setHistory((prev) => [...prev, commandLine, out])
+        }
+      } catch {
+        const out: TerminalLine = {
+          id: (Date.now() + 1).toString(),
+          type: "error",
+          content: `Error removing agent ${current?.id}`,
+          timestamp: commandLine.timestamp,
+        }
+        setHistory((prev) => [...prev, commandLine, out])
+      }
+      setCommand("")
+      return
     }
 
     if (baseCommand === "capes") {

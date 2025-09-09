@@ -92,124 +92,8 @@ interface ListenerEditorProps {
   listeners: Listener[]
   onListenerStatusUpdate: (listenerId: string, status: "active" | "inactive" | "error") => void
   onListenerUpdate: (listenerId: string, listener: Listener) => void
-}
-
-const sampleListenerConfigs: Record<string, ListenerConfig> = {
-  "lst-001": {
-    id: "lst-001",
-    name: "Edge-Listener",
-    protocol: "https",
-    port: 443,
-    bind_addr: "0.0.0.0",
-    public_dns: "updates.example.com",
-    ip_addresses: [],
-    use_ip_instead_of_dns: false,
-    base_agent_key: {
-      key: "",
-      name: "",
-    },
-    target_domain: { enabled: true, expected: "corp.example.com" },
-    http: {
-      get_endpoints: ["/api/health", "/assets/ping", "/v1/checkin"],
-      post_endpoints: ["/api/telemetry", "/collect"],
-      success_status: 204,
-      decoy_status: 200,
-      decoy_body: '{"status":"ok"}',
-      respond_via_get: false,
-    },
-    tls: {
-      min_version: "TLS1.2",
-      max_version: "TLS1.3",
-      alpn: ["h2", "http/1.1"],
-      cert_source: "acme",
-      cert_ref: null,
-      sni: ["updates.example.com"],
-    },
-    crypto: {
-      profile: "agent-default",
-      mode: "ecdh_aesgcm",
-      key_id: "k-2025-09",
-      psk_write_only: null,
-      iv_policy: "auto_per_message",
-    },
-    endpoints: {
-      get: [],
-      post: [],
-    },
-    connection: {
-      max_connections: 100,
-      idle_timeout_sec: 300,
-    },
-  },
-  "lst-002": {
-    id: "lst-002",
-    name: "DNS-Beacon",
-    protocol: "dns",
-    port: 53,
-    bind_addr: "0.0.0.0",
-    public_dns: "stage.updates.example.com",
-    ip_addresses: [],
-    use_ip_instead_of_dns: false,
-    base_agent_key: {
-      key: "",
-      name: "",
-    },
-    target_domain: { enabled: false, expected: "" },
-    dns: {
-      base_name: "stage.updates.example.com",
-      mode: "pure",
-      https_fallback: "",
-    },
-    crypto: {
-      profile: "agent-default",
-      mode: "ecdh_aesgcm",
-      key_id: "k-2025-09",
-      psk_write_only: null,
-      iv_policy: "auto_per_message",
-    },
-    endpoints: {
-      get: [],
-      post: [],
-    },
-    connection: {
-      max_connections: 100,
-      idle_timeout_sec: 300,
-    },
-  },
-  "lst-003": {
-    id: "lst-003",
-    name: "TCP-Channel",
-    protocol: "tcp",
-    port: 8080,
-    bind_addr: "0.0.0.0",
-    public_dns: "api.example.com",
-    ip_addresses: [],
-    use_ip_instead_of_dns: false,
-    base_agent_key: {
-      key: "",
-      name: "",
-    },
-    target_domain: { enabled: false, expected: "" },
-    tcp: {
-      framing: "length_prefix",
-      idle_timeout_sec: 300,
-    },
-    crypto: {
-      profile: "agent-default",
-      mode: "ecdh_aesgcm",
-      key_id: "k-2025-09",
-      psk_write_only: null,
-      iv_policy: "auto_per_message",
-    },
-    endpoints: {
-      get: [],
-      post: [],
-    },
-    connection: {
-      max_connections: 100,
-      idle_timeout_sec: 300,
-    },
-  },
+  onDirtyChange?: (dirty: boolean) => void
+  agents?: Array<{ listener: string }>
 }
 
 interface ProbeResult {
@@ -228,6 +112,8 @@ function ListenerEditor({
   listeners,
   onListenerStatusUpdate,
   onListenerUpdate,
+  onDirtyChange,
+  agents,
 }: ListenerEditorProps) {
   const [config, setConfig] = useState<ListenerConfig>({
     id: "",
@@ -269,53 +155,57 @@ function ListenerEditor({
   const [tabErrors, setTabErrors] = useState<Record<string, boolean>>({})
   const [isDeployed, setIsDeployed] = useState(false)
   const [isDeploying, setIsDeploying] = useState(false)
+  const [originalConfig, setOriginalConfig] = useState<ListenerConfig | null>(null)
+  const isDirty = JSON.stringify(config) !== JSON.stringify(originalConfig)
 
   useEffect(() => {
-    if (selectedListener && sampleListenerConfigs[selectedListener]) {
-      setConfig(sampleListenerConfigs[selectedListener])
-
-      // Find the listener in the dashboard data and sync deployment status
-      const listener = listeners.find((l) => l.id === selectedListener)
-      if (listener) {
-        setIsDeployed(listener.status === "active")
+    const load = async () => {
+      if (!selectedListener) return
+      try {
+        const res = await fetch(`/api/listeners/${selectedListener}`)
+        if (res.ok) {
+          const l = await res.json()
+          const cfg: ListenerConfig = {
+            id: l.id,
+            name: l.name,
+            protocol: l.protocol,
+            port: l.port,
+            bind_addr: l.bind_address || "0.0.0.0",
+            public_dns: l.public_dns || "",
+            ip_addresses: l.ip_addresses || [],
+            use_ip_instead_of_dns: !!(l.ip_addresses && l.ip_addresses.length && !l.public_dns),
+            base_agent_key: { key: l.base_agent_key || "", name: l.base_agent_name || "" },
+            target_domain: (l.config?.target_domain || { enabled: false, expected: "" }) as any,
+            http: l.config?.http,
+            tls: l.config?.tls,
+            dns: l.config?.dns,
+            icmp: l.config?.icmp,
+            tcp: l.config?.tcp,
+            crypto: l.config?.crypto || {
+              profile: "agent-default",
+              mode: "psk_aesgcm",
+              key_id: "",
+              psk_write_only: null,
+              iv_policy: "random",
+            },
+            endpoints: l.config?.endpoints || { get: [], post: [] },
+            connection: l.config?.connection || { max_connections: 100, idle_timeout_sec: 300 },
+          }
+          setConfig(cfg)
+          setOriginalConfig(cfg)
+        }
+      } catch {
+        // Keep existing config; do not fallback to static profiles
       }
-    } else {
-      setConfig({
-        id: "",
-        name: "",
-        protocol: "http",
-        port: 8080,
-        bind_addr: "0.0.0.0",
-        public_dns: "",
-        ip_addresses: [],
-        use_ip_instead_of_dns: false,
-        base_agent_key: {
-          key: "",
-          name: "",
-        },
-        target_domain: {
-          enabled: false,
-          expected: "",
-        },
-        crypto: {
-          profile: "agent-default",
-          mode: "psk_aesgcm",
-          key_id: "",
-          psk_write_only: null,
-          iv_policy: "random",
-        },
-        endpoints: {
-          get: [],
-          post: [],
-        },
-        connection: {
-          max_connections: 100,
-          idle_timeout_sec: 300,
-        },
-      })
-      setIsDeployed(false)
+
+      const listener = listeners.find((l) => l.id === selectedListener)
+      if (listener) setIsDeployed(listener.status === "active")
+      else setIsDeployed(false)
     }
-  }, [selectedListener, listeners])
+    load()
+  }, [selectedListener])
+
+  // Parent can opt-in to dirty state later; keeping internal only for now
 
   const validateConfig = () => {
     if (!config) return false
@@ -349,118 +239,119 @@ function ListenerEditor({
   }
 
   const performProbe = async () => {
-    if (!config) return { success: false, message: "No configuration selected", checks: {} }
-
+    if (!config || !selectedListener) return { success: false, message: "No listener selected", checks: {} } as any
     setIsProbing(true)
     setProbeResult(null)
     setTabErrors({})
-
-    // Simulate probe checks with realistic delays
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    const checks = {
-      localPort: { success: false, message: "" },
-      publicDns: { success: false, message: "" },
-      getEndpoints: { success: false, message: "" },
-      postEndpoints: { success: false, message: "" },
-    }
-
-    // Check local port binding
-    const localPortSuccess = Math.random() > 0.1 // 90% success rate
-    checks.localPort = {
-      success: localPortSuccess,
-      message: localPortSuccess
-        ? `Port ${config.port} is listening on ${config.bind_addr}`
-        : `Failed to bind to port ${config.port} on ${config.bind_addr} - port may be in use`,
-    }
-
-    // Check public DNS/IP accessibility
-    const publicDnsSuccess = localPortSuccess && Math.random() > 0.2 // 80% success rate if local port works
-    checks.publicDns = {
-      success: publicDnsSuccess,
-      message: publicDnsSuccess
-        ? `Port ${config.port} is accessible via ${config.use_ip_instead_of_dns ? config.ip_addresses.join(", ") : config.public_dns}`
-        : `Port ${config.port} is not accessible via ${config.use_ip_instead_of_dns ? config.ip_addresses.join(", ") : config.public_dns} - check firewall/NAT settings`,
-    }
-
-    // Check HTTP/HTTPS endpoints if applicable
-    if (config.protocol === "http" || config.protocol === "https") {
-      const getEndpointsSuccess = publicDnsSuccess && Math.random() > 0.15 // 85% success rate
-      checks.getEndpoints = {
-        success: getEndpointsSuccess,
-        message: getEndpointsSuccess
-          ? `All GET endpoints returned status ${config.http?.success_status || 204}`
-          : `GET endpoint ${config.http?.get_endpoints[0] || "/api/health"} returned unexpected status code`,
+    try {
+      const res = await fetch(`/api/listeners/${selectedListener}/probe`, { method: "POST" })
+      const result = (await res.json()) as ProbeResult
+      const newTabErrors: Record<string, boolean> = {}
+      if (!result.checks.localPort.success || !result.checks.publicDns.success) newTabErrors.basic = true
+      if (config.protocol === "https" && !result.checks.publicDns.success) newTabErrors.tls = true
+      if (
+        (config.protocol === "http" || config.protocol === "https") &&
+        (!result.checks.getEndpoints?.success || !result.checks.postEndpoints?.success)
+      )
+        newTabErrors.http = true
+      setTabErrors(newTabErrors)
+      setProbeResult(result)
+      setShowProbePopup(true)
+      // Update status based on probe result rules
+      const current = listeners.find((l) => l.id === selectedListener)
+      if (result.success) {
+        // If it was in error, move to inactive (offline) per spec
+        if (current && current.status === 'error') {
+          onListenerStatusUpdate(selectedListener, 'inactive')
+        }
+      } else {
+        onListenerStatusUpdate(selectedListener, 'error')
       }
-
-      const postEndpointsSuccess = getEndpointsSuccess && Math.random() > 0.15 // 85% success rate
-      checks.postEndpoints = {
-        success: postEndpointsSuccess,
-        message: postEndpointsSuccess
-          ? `All POST endpoints returned status ${config.http?.success_status || 204}`
-          : `POST endpoint ${config.http?.post_endpoints[0] || "/api/telemetry"} returned unexpected status code`,
-      }
+      setTimeout(() => setShowProbePopup(false), 5000)
+      return result
+    } catch (e) {
+      const fallback: ProbeResult = {
+        success: false,
+        message: "Probe failed",
+        checks: {
+          localPort: { success: false, message: "Probe error" },
+          publicDns: { success: false, message: "Probe error" },
+        },
+      } as any
+      setProbeResult(fallback)
+      setShowProbePopup(true)
+      return fallback
+    } finally {
+      setIsProbing(false)
     }
-
-    const overallSuccess = Object.values(checks).every((check) => check.success)
-
-    const result: ProbeResult = {
-      success: overallSuccess,
-      message: overallSuccess
-        ? `Listener ${config.name} successfully passed probe check`
-        : `Listener ${config.name} failed probe check`,
-      checks,
-    }
-
-    // Set tab errors for failed checks
-    const newTabErrors: Record<string, boolean> = {}
-    if (!checks.localPort.success || !checks.publicDns.success) {
-      newTabErrors.basic = true
-    }
-    if (config.protocol === "https" && !checks.publicDns.success) {
-      newTabErrors.tls = true
-    }
-    if (
-      (config.protocol === "http" || config.protocol === "https") &&
-      (!checks.getEndpoints?.success || !checks.postEndpoints?.success)
-    ) {
-      newTabErrors.http = true
-    }
-
-    setTabErrors(newTabErrors)
-    setProbeResult(result)
-    setShowProbePopup(true)
-    setIsProbing(false)
-
-    // Auto-hide popup after 5 seconds
-    setTimeout(() => setShowProbePopup(false), 5000)
-
-    return result
   }
 
   const deployListener = async () => {
     if (!config || !selectedListener) return
 
     setIsDeploying(true)
+    // Build payload (same defaults as save)
+    const defaultGet = ["/api/health"]
+    const defaultPost = ["/api/telemetry"]
+    const httpCfg = {
+      ...config.http,
+      get_endpoints:
+        (config.http?.get_endpoints && config.http.get_endpoints.filter((e) => e && e.trim()))?.length
+          ? config.http!.get_endpoints!.filter((e) => e && e.trim())
+          : defaultGet,
+      post_endpoints:
+        (config.http?.post_endpoints && config.http.post_endpoints.filter((e) => e && e.trim()))?.length
+          ? config.http!.post_endpoints!.filter((e) => e && e.trim())
+          : defaultPost,
+    }
 
-    // Simulate deployment process
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    const payload = {
+      name: config.name,
+      protocol: config.protocol,
+      port: config.port,
+      bind_addr: config.bind_addr,
+      public_dns: config.use_ip_instead_of_dns ? "" : config.public_dns,
+      ip_addresses: config.ip_addresses,
+      base_agent_key: { ...config.base_agent_key },
+      config: {
+        target_domain: config.target_domain,
+        http: httpCfg,
+        tls: config.tls,
+        dns: config.dns,
+        icmp: config.icmp,
+        tcp: config.tcp,
+        crypto: config.crypto,
+        endpoints: config.endpoints,
+        connection: config.connection,
+      },
+    }
 
-    // After deployment, automatically probe
+    // Persist new configuration then activate
+    try {
+      const res = await fetch(`/api/listeners/${selectedListener}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) {
+        const saved = await res.json()
+        onListenerUpdate(selectedListener, saved)
+        setIsDeployed(true)
+        // Set status active to trigger runner reload
+        onListenerStatusUpdate(selectedListener, "active")
+      }
+    } catch {}
+
+    // Probe after deployment
     setIsProbing(true)
     const result = await performProbe()
     setIsProbing(false)
 
-    if (result.success) {
-      setIsDeployed(true)
+    if (result && result.success) {
       setProbeResult(result)
-      // Update dashboard status to active
-      onListenerStatusUpdate(selectedListener, "active")
     } else {
-      // If probe fails, revert deployment status
       setIsDeployed(false)
-      setProbeResult(result)
-      // Update dashboard status to error
+      setProbeResult(result as any)
       onListenerStatusUpdate(selectedListener, "error")
     }
 
@@ -486,48 +377,59 @@ function ListenerEditor({
   const handleSaveOrDeploy = async () => {
     if (isDeployed) {
       if (!config || !selectedListener) return
-
       setIsDeploying(true)
+      // Default endpoints if empty or blank entries
+      const defaultGet = ["/api/health"]
+      const defaultPost = ["/api/telemetry"]
+      const httpCfg = {
+        ...config.http,
+        get_endpoints:
+          (config.http?.get_endpoints && config.http.get_endpoints.filter((e) => e && e.trim()))?.length
+            ? config.http!.get_endpoints!.filter((e) => e && e.trim())
+            : defaultGet,
+        post_endpoints:
+          (config.http?.post_endpoints && config.http.post_endpoints.filter((e) => e && e.trim()))?.length
+            ? config.http!.post_endpoints!.filter((e) => e && e.trim())
+            : defaultPost,
+      }
 
-      // Update the listener in the dashboard with new configuration
-      const updatedListener = {
-        id: selectedListener,
+      const payload = {
+        name: config.name,
         protocol: config.protocol,
         port: config.port,
-        public_dns: config.public_dns,
         bind_addr: config.bind_addr,
-        name: config.name,
-        status: "active",
-        last_activity: Date.now(),
-        requests_count: 0,
-        errors_count: 0,
+        public_dns: config.use_ip_instead_of_dns ? "" : config.public_dns,
+        ip_addresses: config.ip_addresses,
+        base_agent_key: { ...config.base_agent_key },
+        config: {
+          target_domain: config.target_domain,
+          http: httpCfg,
+          tls: config.tls,
+          dns: config.dns,
+          icmp: config.icmp,
+          tcp: config.tcp,
+          crypto: config.crypto,
+          endpoints: config.endpoints,
+          connection: config.connection,
+        },
       }
-
-      // Update dashboard with new configuration
-      onListenerUpdate(selectedListener, updatedListener)
-
-      // Simulate save process
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // After saving, redeploy with new configuration
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // Automatically probe after redeployment
-      setIsProbing(true)
+      try {
+        const res = await fetch(`/api/listeners/${selectedListener}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (res.ok) {
+          const saved = await res.json()
+          onListenerUpdate(selectedListener, saved)
+          setOriginalConfig(config)
+        }
+      } catch {}
       const result = await performProbe()
-      setIsProbing(false)
-
-      if (result.success) {
-        setProbeResult(result)
-        onListenerStatusUpdate(selectedListener, "active")
-      } else {
-        setProbeResult(result)
-        onListenerStatusUpdate(selectedListener, "error")
-      }
-
+      if (result && result.success) onListenerStatusUpdate(selectedListener, "active")
+      else onListenerStatusUpdate(selectedListener, "error")
       setIsDeploying(false)
     } else {
-      // Deploy if not deployed
       deployListener()
     }
   }
@@ -551,7 +453,7 @@ function ListenerEditor({
     if (!config) return
 
     const endpoints = type === "get" ? config.http?.get_endpoints : config.http?.post_endpoints
-    const newEndpoints = endpoints?.filter((_, i) => i !== index)
+    const newEndpoints = (endpoints?.filter((_, i) => i !== index)) || []
 
     setConfig({
       ...config,
@@ -647,7 +549,7 @@ function ListenerEditor({
                     {isDeployed ? "Saving..." : "Deploying..."}
                   </>
                 ) : (
-                  <>{isDeployed ? "Save" : "Deploy"}</>
+                  <>{isDeployed ? (isDirty ? "Save & Probe" : "Redeploy & Probe") : "Deploy"}</>
                 )}
               </Button>
 
@@ -902,7 +804,7 @@ function ListenerEditor({
                       </Button>
                     </div>
                     <div className="space-y-2">
-                      {config.http?.get_endpoints.map((endpoint, index) => (
+                      {(config.http?.get_endpoints ?? []).map((endpoint, index) => (
                         <div key={index} className="flex gap-2">
                           <Input
                             value={endpoint}
@@ -931,7 +833,7 @@ function ListenerEditor({
                       </Button>
                     </div>
                     <div className="space-y-2">
-                      {config.http?.post_endpoints.map((endpoint, index) => (
+                      {(config.http?.post_endpoints ?? []).map((endpoint, index) => (
                         <div key={index} className="flex gap-2">
                           <Input
                             value={endpoint}
@@ -1330,37 +1232,77 @@ function ListenerEditor({
               </TabsContent>
 
               <TabsContent value="status" className="space-y-6 mt-0">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Status</Label>
-                    <Badge className="bg-green-500/20 text-green-100 border-green-500/30">Active</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Last Activity</Label>
-                    <p className="text-sm text-muted-foreground">2 minutes ago</p>
-                  </div>
-                </div>
+                {(() => {
+                  const sel = selectedListener ? listeners.find((l) => l.id === selectedListener) : null
+                  const formatAgo = (ts?: number) => {
+                    if (!ts) return 'unknown'
+                    const diff = Math.max(0, Date.now() - ts)
+                    const s = Math.floor(diff / 1000)
+                    if (s < 60) return `${s}s ago`
+                    const m = Math.floor(s / 60)
+                    if (m < 60) return `${m}m ago`
+                    const h = Math.floor(m / 60)
+                    return `${h}h ago`
+                  }
+                  const totalAgents = agents?.length || 0
+                  const thisAgents = selectedListener && agents ? agents.filter((a) => a.listener === selectedListener).length : 0
+                  const multiListeners = listeners.length > 1
+                  const agentShare = totalAgents > 0 ? thisAgents / totalAgents : 0
+                  const opsecWarnings: string[] = []
+                  if (multiListeners && agentShare > 0.8) {
+                    opsecWarnings.push(`High agent concentration: ${(agentShare * 100).toFixed(0)}% assigned here across ${listeners.length} listeners`)
+                  }
+                  if ((sel?.status === 'active') && sel?.last_activity && Date.now() - sel.last_activity < 10_000) {
+                    opsecWarnings.push('High activity detected in the last 10 seconds')
+                  }
+                  const reqs = sel?.requests_count ?? 0
+                  const decoys = sel?.errors_count ?? 0
+                  const statusBadge = sel?.status === 'active' ? 'bg-green-500/20 text-green-100 border-green-500/30' : sel?.status === 'error' ? 'bg-red-500/20 text-red-100 border-red-500/30' : 'bg-gray-500/20 text-white border-gray-500/30'
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Total Requests</Label>
-                    <p className="text-2xl font-bold text-primary">1,247</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Errors</Label>
-                    <p className="text-2xl font-bold text-destructive">3</p>
-                  </div>
-                </div>
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Badge className={statusBadge}>{sel?.status || 'unknown'}</Badge>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Last Activity</Label>
+                          <p className="text-sm text-muted-foreground">{formatAgo(sel?.last_activity)}</p>
+                        </div>
+                      </div>
 
-                <div className="space-y-2">
-                  <Label>OPSEC Warnings</Label>
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-md p-3">
-                    <div className="flex items-center gap-2 text-yellow-600 text-sm">
-                      <AlertTriangle className="h-4 w-4" />
-                      Single hard-coded endpoint detected - consider adding more endpoints for better OPSEC
-                    </div>
-                  </div>
-                </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Total Requests</Label>
+                          <p className="text-2xl font-bold text-primary">{reqs}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Decoy Responses</Label>
+                          <p className="text-2xl font-bold text-destructive">{decoys}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>OPSEC Warnings</Label>
+                        {opsecWarnings.length === 0 ? (
+                          <div className="text-sm text-muted-foreground">No warnings</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {opsecWarnings.map((w, i) => (
+                              <div key={i} className="bg-yellow-500/10 border border-yellow-500/20 rounded-md p-3">
+                                <div className="flex items-center gap-2 text-yellow-600 text-sm">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  {w}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )
+                })()}
               </TabsContent>
             </div>
           </Tabs>

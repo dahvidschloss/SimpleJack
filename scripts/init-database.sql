@@ -144,31 +144,4 @@ INSERT OR REPLACE INTO agents (
     strftime('%s', 'now') * 1000 - 30000
 );
 
-INSERT OR REPLACE INTO listeners (
-    id, name, protocol, port, public_dns, ip_addresses, status,
-    last_activity, requests_count, errors_count
-) VALUES 
-(
-    'lst-001',
-    'Edge-Listener',
-    'https',
-    443,
-    'updates.example.com',
-    '[]',
-    'active',
-    strftime('%s', 'now') * 1000 - 30000,
-    1247,
-    3
-),
-(
-    'lst-002',
-    'DNS-Beacon',
-    'dns',
-    53,
-    'stage.updates.example.com',
-    '[]',
-    'active',
-    strftime('%s', 'now') * 1000 - 120000,
-    892,
-    0
-);
+-- No default listeners seeded; UI/API will create them

@@ -48,6 +48,18 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Broadcast SSE event to any subscribers so UIs can refresh only when there is a change
+    try {
+      const g = globalThis as any
+      if (g.__sseSubscribers && g.__sseSubscribers.size) {
+        const payload = JSON.stringify(commandRecord)
+        const msg = `event: command:result\ndata: ${payload}\n\n`
+        for (const sub of g.__sseSubscribers as Set<{ id: number; send: (data: string) => void }>) {
+          try { sub.send(msg) } catch {}
+        }
+      }
+    } catch {}
+
     return NextResponse.json(commandRecord, { status: 201 })
   } catch (error) {
     console.error("Failed to create command:", error)

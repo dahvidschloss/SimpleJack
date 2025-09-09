@@ -194,6 +194,25 @@
       "preview": "agent_info",
       "parser": "generic",
       "help": "Shows comprehensive information about the agent including status, configuration, capabilities, and system details."
+    },
+        {
+      "id": "remove",
+      "name": "remove",
+      "synopsis": "removes the agent from the listing and databse. DOES NOT FORCE EAT!",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "",
+          "required": true,
+          "description": "first 8 charaters of the Agent ID"
+        }
+      ],
+      "preview": "remove <id>",
+      "parser": "generic",
+      "help": "Removes the agent from the listing and databse. DOES NOT FORCE EAT!"
     }
   ]
 }

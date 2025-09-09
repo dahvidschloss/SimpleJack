@@ -2,15 +2,17 @@ import Database from "better-sqlite3"
 import { readFileSync } from "fs"
 import { join } from "path"
 
-// Initialize SQLite database
-const db = new Database("c2.db")
+// Initialize SQLite database (singleton in dev to avoid re-init noise)
+const g = globalThis as any
+const db: Database.Database = g.__c2db || new Database("c2.db")
+g.__c2db = db
 
 // Initialize database schema
 export function initializeDatabase() {
   try {
     const schema = readFileSync(join(process.cwd(), "scripts", "init-database.sql"), "utf8")
     db.exec(schema)
-    console.log("Database initialized successfully")
+    // Suppress noisy dev logs across route workers
   } catch (error) {
     console.error("Failed to initialize database:", error)
   }
@@ -154,6 +156,12 @@ export const agentDb = {
     )
     stmt.run(status, Date.now(), id)
   },
+
+  delete: (id: string): boolean => {
+    const stmt = db.prepare("DELETE FROM agents WHERE id = ?")
+    const info = stmt.run(id)
+    return info.changes > 0
+  },
 }
 
 // Listener database operations
@@ -207,6 +215,12 @@ export const listenerDb = {
 
     return listenerDb.getById(id)
   },
+
+  delete: (id: string): boolean => {
+    const stmt = db.prepare("DELETE FROM listeners WHERE id = ?")
+    const info = stmt.run(id)
+    return info.changes > 0
+  },
 }
 
 // Command database operations
@@ -241,7 +255,10 @@ export const commandDb = {
   },
 }
 
-// Initialize database on import
-initializeDatabase()
+// Initialize database on import (once per process)
+if (!g.__dbInitialized) {
+  initializeDatabase()
+  g.__dbInitialized = true
+}
 
 export default db

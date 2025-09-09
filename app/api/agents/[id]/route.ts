@@ -61,3 +61,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: "Failed to update agent" }, { status: 500 })
   }
 }
+
+export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const ok = agentDb.delete(params.id)
+    if (!ok) return NextResponse.json({ error: "Agent not found" }, { status: 404 })
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error("Failed to delete agent:", error)
+    return NextResponse.json({ error: "Failed to delete agent" }, { status: 500 })
+  }
+}

@@ -46,11 +46,13 @@ interface Listener {
   protocol: "http" | "https" | "dns" | "icmp" | "tcp"
   port: number
   public_dns: string
-  ip_addresses?: string[] // Added IP addresses support
+  ip_addresses?: string[] 
   status: "active" | "inactive" | "error"
   last_activity: number
   requests_count: number
   errors_count: number
+  agent_key: string
+  agent_id: string
 }
 
 export default function CommandControlPage() {
@@ -60,49 +62,181 @@ export default function CommandControlPage() {
   const [listeners, setListeners] = useState<Listener[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [showNewListenerWizard, setShowNewListenerWizard] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true) // initial page load only
+  const [fetching, setFetching] = useState(false) // background fetch state
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false) // disable periodic polling for now
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchAgents = async () => {
       try {
-        setLoading(true)
-
-        // Fetch agents from API
+        setFetching(true)
         const agentsResponse = await fetch("/api/agents")
         if (agentsResponse.ok) {
           const agentsData = await agentsResponse.json()
-          setAgents(agentsData)
+          const normalized = agentsData.map((a: any) => ({
+            id: a.id,
+            hostname: a.hostname,
+            ipAddr: Array.isArray(a.ipAddr) ? a.ipAddr : (() => {
+              try {
+                const parsed = JSON.parse(a.ip_addr || "[]")
+                return Array.isArray(parsed) ? parsed : [String(a.ip_addr || "")]
+              } catch {
+                return [String(a.ip_addr || "")]
+              }
+            })(),
+            os: a.os,
+            build: a.build,
+            lastCallback: a.last_callback,
+            createdTime: a.created_time,
+            callbackInterval: a.callback_interval,
+            jitterValue: a.jitter_value,
+            jitterTranslate: a.jitter_translate,
+            pid: a.pid,
+            user: a.user ?? a.user_context,
+            base_agent: a.base_agent,
+            terminalHistory: a.terminalHistory ?? a.terminal_history ?? "",
+            loadedCommands: a.loadedCommands ?? (() => { try { return JSON.parse(a.loaded_commands || "[]") } catch { return [] } })(),
+            cwd: a.cwd,
+            lastQueuedTask: a.last_queued_task,
+            currentRunningTask: a.current_running_task,
+            lastErrorTask: a.last_error_task,
+            listener: a.listener,
+            workHours: a.work_hours,
+            killDate: a.kill_date,
+            edr: a.edr ?? (() => { try { return JSON.parse(a.edr || "[]") } catch { return [] } })(),
+            targetDomain: a.target_domain,
+            lastError: a.last_error,
+            defaultShell: a.default_shell,
+            IntegrityLevel: a.IntegrityLevel ?? a.integrity_level,
+            status: a.status,
+            lastSeenTimestamp: a.lastSeenTimestamp ?? a.last_seen_timestamp,
+          }))
+          setAgents(normalized)
         } else {
           console.error("Failed to fetch agents")
-          // Fallback to sample data if API fails
-          setAgents(sampleAgents)
-        }
-
-        // Fetch listeners from API
-        const listenersResponse = await fetch("/api/listeners")
-        if (listenersResponse.ok) {
-          const listenersData = await listenersResponse.json()
-          setListeners(listenersData)
-        } else {
-          console.error("Failed to fetch listeners")
-          // Fallback to sample data if API fails
-          setListeners(sampleListeners)
+          setAgents([])
         }
       } catch (error) {
-        console.error("Error fetching data:", error)
-        // Fallback to sample data on error
-        setAgents(sampleAgents)
-        setListeners(sampleListeners)
+        console.error("Error fetching agents:", error)
+        setAgents([])
       } finally {
-        setLoading(false)
+        setFetching(false)
       }
     }
 
-    fetchData()
+    const fetchListeners = async () => {
+      try {
+        setFetching(true)
+        const listenersResponse = await fetch("/api/listeners")
+        if (listenersResponse.ok) {
+          const listenersData = await listenersResponse.json()
+          const normalizedListeners = listenersData.map((l: any) => ({
+            id: l.id,
+            name: l.name,
+            protocol: l.protocol,
+            port: l.port,
+            public_dns: l.public_dns,
+            ip_addresses: l.ip_addresses ?? (() => { try { return JSON.parse(l.ip_addresses || "[]") } catch { return [] } })(),
+            status: l.status,
+            last_activity: l.last_activity,
+            requests_count: l.requests_count,
+            errors_count: l.errors_count,
+          }))
+          setListeners(normalizedListeners)
+        } else {
+          console.error("Failed to fetch listeners")
+          setListeners([])
+        }
+      } catch (error) {
+        console.error("Error fetching listeners:", error)
+        setListeners([])
+      } finally {
+        setFetching(false)
+      }
+    }
 
-    // Set up polling for real-time updates
-    const interval = setInterval(fetchData, 30000) // Poll every 30 seconds
-    return () => clearInterval(interval)
+    const fetchData = async () => {
+      // Initial blocking spinner only the first time
+      setLoading((prev) => prev && true)
+      if (activeTab === "agents") await fetchAgents()
+      if (activeTab === "listeners") await fetchListeners()
+      setLoading(false)
+    }
+
+    fetchData()
+    // No background polling to avoid input disruption; manual refresh via button can be added
+  }, [activeTab])
+
+  // Lightweight periodic refresh for agents only, preserves terminal input
+  useEffect(() => {
+    let cancelled = false
+    const fetchAgentsOnly = async () => {
+      try {
+        const res = await fetch('/api/agents')
+        if (res.ok) {
+          const agentsData = await res.json()
+          const normalized = agentsData.map((a: any) => ({
+            id: a.id,
+            hostname: a.hostname,
+            ipAddr: Array.isArray(a.ipAddr) ? a.ipAddr : (() => { try { const parsed = JSON.parse(a.ip_addr || "[]"); return Array.isArray(parsed) ? parsed : [String(a.ip_addr || "")] } catch { return [String(a.ip_addr || "")] } })(),
+            os: a.os,
+            build: a.build,
+            lastCallback: a.last_callback,
+            createdTime: a.created_time,
+            callbackInterval: a.callback_interval,
+            jitterValue: a.jitter_value,
+            jitterTranslate: a.jitter_translate,
+            pid: a.pid,
+            user: a.user ?? a.user_context,
+            base_agent: a.base_agent,
+            terminalHistory: a.terminalHistory ?? a.terminal_history ?? "",
+            loadedCommands: a.loadedCommands ?? (() => { try { return JSON.parse(a.loaded_commands || "[]") } catch { return [] } })(),
+            cwd: a.cwd,
+            lastQueuedTask: a.last_queued_task,
+            currentRunningTask: a.current_running_task,
+            lastErrorTask: a.last_error_task,
+            listener: a.listener,
+            workHours: a.work_hours,
+            killDate: a.kill_date,
+            edr: a.edr ?? (() => { try { return JSON.parse(a.edr || "[]") } catch { return [] } })(),
+            targetDomain: a.target_domain,
+            lastError: a.last_error,
+            defaultShell: a.default_shell,
+            IntegrityLevel: a.IntegrityLevel ?? a.integrity_level,
+            status: a.status,
+            lastSeenTimestamp: a.lastSeenTimestamp ?? a.last_seen_timestamp,
+          }))
+          if (!cancelled) setAgents(normalized)
+        }
+      } catch {}
+    }
+    const onRefresh = () => fetchAgentsOnly()
+    window.addEventListener('agents:refresh', onRefresh)
+    // SSE subscription (singleton) for push events to avoid multiple stream connections
+    try {
+      const w = window as any
+      if (!w.__sse) {
+        w.__sse = new EventSource('/api/events/stream')
+      }
+      const es: EventSource = w.__sse
+      const onAgents = () => fetchAgentsOnly()
+      const onCommand = (ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data)
+          window.dispatchEvent(new CustomEvent('command:result', { detail: data }))
+        } catch {}
+      }
+      es.addEventListener('agents:refresh', onAgents as any)
+      es.addEventListener('command:result', onCommand as any)
+      return () => {
+        cancelled = true
+        window.removeEventListener('agents:refresh', onRefresh)
+        es.removeEventListener('agents:refresh', onAgents as any)
+        es.removeEventListener('command:result', onCommand as any)
+      }
+    } catch {
+      return () => { cancelled = true; window.removeEventListener('agents:refresh', onRefresh) }
+    }
   }, [])
 
   const updateListenerStatus = async (listenerId: string, status: "active" | "inactive" | "error") => {
@@ -125,6 +259,21 @@ export default function CommandControlPage() {
           listener.id === listenerId ? { ...listener, status, last_activity: Date.now() } : listener,
         ),
       )
+    }
+  }
+
+  const deleteListener = async (listenerId: string) => {
+    try {
+      const res = await fetch(`/api/listeners/${listenerId}`, { method: "DELETE" })
+      if (res.ok || res.status === 404) {
+        // Consider 404 as already-deleted; remove from UI
+        setListeners((prev) => prev.filter((l) => l.id !== listenerId))
+        if (selectedListener === listenerId) setSelectedListener(null)
+      }
+    } catch (e) {
+      // Optimistic removal on network errors
+      setListeners((prev) => prev.filter((l) => l.id !== listenerId))
+      if (selectedListener === listenerId) setSelectedListener(null)
     }
   }
 
@@ -190,54 +339,9 @@ export default function CommandControlPage() {
     setShowNewListenerWizard(false)
   }
 
-  const sampleAgents: Agent[] = [
-    {
-      id: "a7f9e-4d2c-8b1a-3e5f-9c8d7b6a5e4f",
-      hostname: "WS-ADMIN-01",
-      ipAddr: ["192.168.1.100", "10.10.10.10"],
-      os: "Microsoft Windows 11 Pro",
-      build: "10.0.26100 N/A Build 26100",
-      lastCallback: new Date(Date.now() - 45000).toISOString(),
-      createdTime: new Date(Date.now() - 86400000).toISOString(),
-      callbackInterval: 60,
-      jitterValue: 15,
-      jitterTranslate: 9,
-      pid: 4892,
-      user: "ACME\\administrator",
-      base_agent: "Selfish_Cowboy",
-      terminalHistory: `13:44:10\nAgent returned ls results at 13:44:20:\ntotal 24\ndrwxr-xr-x  4 user user 4096 Dec  8 10:30 .`,
-      loadedCommands: ["Loader", "Console Execution", "Exit/Eat"],
-      cwd: "C:\\Windows\\System32",
-      lastQueuedTask: "whoami",
-      currentRunningTask: "",
-      lastErrorTask: "",
-      listener: "edge-listener",
-      workHours: "08:00-18:00",
-      killDate: new Date(Date.now() + 15552000000).toISOString(),
-      edr: ["Windows Defender", "CrowdStrike"],
-      targetDomain: "acme.corp",
-      lastError: "",
-      defaultShell: "powershell",
-      IntegrityLevel: "Administrator",
-      status: "online",
-      lastSeenTimestamp: Date.now() - 45000,
-    },
-  ]
+  // No static agents; all data comes from DB
 
-  const sampleListeners: Listener[] = [
-    {
-      id: "lst-001",
-      name: "Edge-Listener",
-      protocol: "https",
-      port: 443,
-      public_dns: "updates.example.com",
-      ip_addresses: [],
-      status: "active",
-      last_activity: Date.now() - 30000,
-      requests_count: 1247,
-      errors_count: 3,
-    },
-  ]
+  // No static listeners; all data comes from DB
 
   if (loading) {
     return (
@@ -254,7 +358,10 @@ export default function CommandControlPage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-card px-6 py-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-foreground">Command & Control Interface</h1>
+          <div className="flex items-center gap-3">
+            <img src="simpleJack.png" alt="Simple Jack" className="h-20 w-20" />
+            <h1 className="text-2xl font-bold text-foreground">Simple Jack C2</h1>
+          </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full bg-primary animate-pulse"></div>
@@ -274,7 +381,7 @@ export default function CommandControlPage() {
             </TabsList>
 
             <TabsContent value="agents" className="flex-1 mt-4 mx-4">
-              <AgentDashboard onAgentSelect={setSelectedAgent} selectedAgent={selectedAgent} />
+              <AgentDashboard onAgentSelect={setSelectedAgent} selectedAgent={selectedAgent} agentsData={agents} />
             </TabsContent>
 
             <TabsContent value="listeners" className="flex-1 mt-4 mx-4">
@@ -283,6 +390,7 @@ export default function CommandControlPage() {
                 selectedListener={selectedListener}
                 listeners={listeners}
                 onListenerStatusUpdate={updateListenerStatus}
+                onListenerDelete={deleteListener}
                 onNewListener={() => setShowNewListenerWizard(true)}
               />
             </TabsContent>
@@ -292,7 +400,33 @@ export default function CommandControlPage() {
         {/* Right Panel - Terminal/Listener Editor/Wizard */}
         <div className="w-1/2">
           {activeTab === "agents" ? (
-            <TerminalInterface selectedAgent={selectedAgent} agents={agents} />
+            <TerminalInterface
+              selectedAgent={selectedAgent}
+              agents={agents.map((a) => ({
+                id: a.id,
+                hostname: a.hostname,
+                ip: Array.isArray(a.ipAddr) ? a.ipAddr : a.ipAddr ? [a.ipAddr as any] : [],
+                os: a.os,
+                status: a.status,
+                lastSeenTimestamp: a.lastSeenTimestamp,
+                callbackInterval: a.callbackInterval,
+                jitterPercent: a.jitterValue,
+                pid: a.pid,
+                user: a.user,
+                base_agent: a.base_agent,
+                loadedCommands: a.loadedCommands,
+                cwd: a.cwd,
+                lastQueuedTask: a.lastQueuedTask,
+                currentRunningTask: a.currentRunningTask,
+                lastErrorTask: a.lastErrorTask,
+                commandHistory: [],
+                build: a.build,
+                defaultShell: a.defaultShell,
+                IntegrityLevel: a.IntegrityLevel,
+                edr: a.edr,
+                listener: a.listener,
+              }))}
+            />
           ) : showNewListenerWizard ? (
             <NewListenerWizard onComplete={handleWizardComplete} onCancel={handleWizardCancel} />
           ) : (
@@ -301,6 +435,7 @@ export default function CommandControlPage() {
               listeners={listeners}
               onListenerStatusUpdate={updateListenerStatus}
               onListenerUpdate={updateListener}
+              agents={agents}
             />
           )}
         </div>
