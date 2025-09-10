@@ -1,0 +1,18 @@
+{
+  "name": "toliet_oracle",
+  "language": "powershell",
+  "capes": [
+    {
+      "name": "Loader",
+      "file": "",
+      "default": true,
+      "description": "Enables the Load command should be default"
+    },
+    {
+      "name": "Manager",
+      "file": "",
+      "default": true,
+      "description": "Localized managmet"
+    }
+  ]
+}

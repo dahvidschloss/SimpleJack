@@ -92,56 +92,5 @@ CREATE INDEX IF NOT EXISTS idx_commands_time_tasked ON commands (time_tasked);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions (agent_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions (is_active);
 
--- Insert sample data
-INSERT OR REPLACE INTO agents (
-    id, hostname, ip_addr, os, build, last_callback, created_time,
-    callback_interval, jitter_value, jitter_translate, pid, user_context,
-    base_agent, terminal_history, loaded_commands, cwd, listener,
-    edr, target_domain, default_shell, integrity_level, status, last_seen_timestamp
-) VALUES 
-(
-    'a7f9e-4d2c-8b1a-3e5f-9c8d7b6a5e4f',
-    'WS-ADMIN-01',
-    '["192.168.1.100", "10.10.10.10"]',
-    'Microsoft Windows 11 Pro',
-    '10.0.26100 N/A Build 26100',
-    datetime('now', '-45 seconds'),
-    datetime('now', '-1 day'),
-    60, 15, 9, 4892,
-    'ACME\administrator',
-    'Selfish_Cowboy',
-    '13:44:10\nAgent returned ls results at 13:44:20:\ntotal 24\ndrwxr-xr-x  4 user user 4096 Dec  8 10:30 .',
-    '["Loader", "Console Execution", "Exit/Eat"]',
-    'C:\Windows\System32',
-    'edge-listener',
-    '["Windows Defender", "CrowdStrike"]',
-    'acme.corp',
-    'powershell',
-    'Administrator',
-    'online',
-    strftime('%s', 'now') * 1000 - 45000
-),
-(
-    'b8e7d-5c3b-9a2f-4e6d-8c7b6a5f4e3d',
-    'SRV-DB-01',
-    '192.168.1.50',
-    'Ubuntu 22.04.3 LTS',
-    '5.15.0-91-generic',
-    datetime('now', '-30 seconds'),
-    datetime('now', '-2 days'),
-    120, 10, 12, 1337,
-    'root',
-    'Silent_Penguin',
-    '14:22:15\nAgent returned id results at 14:22:18:\nuid=0(root) gid=0(root) groups=0(root)',
-    '["Loader", "Console Execution", "Exit/Eat", "Token_Impersonation"]',
-    '/home/admin',
-    'http-listener',
-    '["ClamAV"]',
-    'internal.lab',
-    'bash',
-    'root',
-    'online',
-    strftime('%s', 'now') * 1000 - 30000
-);
+-- No sample agents or listeners are seeded; UI/API will create them
 
--- No default listeners seeded; UI/API will create them

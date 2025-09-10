@@ -112,12 +112,47 @@ export function AgentDashboard({ onAgentSelect, selectedAgent, agentsData }: Age
     }
   }, [agentsData])
 
+  // Work-hours parser (supports "24/7", "HH:MM-HH:MM", or "H-H")
+  const inWorkHours = (workHours: string) => {
+    if (!workHours || workHours.trim().toLowerCase() === "24/7") return true
+    const m = workHours.match(/^(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?$/)
+    if (!m) return true
+    const [ , sh, sm, eh, em ] = m
+    const startH = Math.max(0, Math.min(23, Number(sh)))
+    const startM = Math.max(0, Math.min(59, sm ? Number(sm) : 0))
+    const endH = Math.max(0, Math.min(23, Number(eh)))
+    const endM = Math.max(0, Math.min(59, em ? Number(em) : 0))
+    const now = new Date()
+    const minsNow = now.getHours() * 60 + now.getMinutes()
+    const minsStart = startH * 60 + startM
+    const minsEnd = endH * 60 + endM
+    if (minsStart === minsEnd) return false
+    if (minsStart < minsEnd) return minsNow >= minsStart && minsNow < minsEnd
+    return minsNow >= minsStart || minsNow < minsEnd
+  }
+
+  // Derive display status locally so icons/badges update as time passes
+  const getDisplayStatus = (a: Agent): Agent["status"] => {
+    if (!inWorkHours(a.workHours)) return "hibernation"
+    const lastSeen = Number(a.lastSeenTimestamp || 0)
+    const intervalSec = Math.max(1, Number(a.callbackInterval || 60))
+    const jitterPct = Math.max(0, Number(a.jitterValue || 0))
+    const windowMs = intervalSec * 1000
+    const jitterMs = Math.round(windowMs * (jitterPct / 100))
+    const threshold1 = lastSeen + windowMs + jitterMs
+    const threshold3 = lastSeen + 3 * (windowMs + jitterMs)
+    if (currentTime <= threshold1) return "online"
+    if (currentTime <= threshold3) return "possibly-dead"
+    return "offline"
+  }
+
   const filteredAgents = agents.filter((agent) => {
     const matchesSearch = agent.hostname.toLowerCase().includes(searchTerm.toLowerCase()) || agent.ipAddr.includes(searchTerm)
+    const displayStatus = getDisplayStatus(agent)
     let matchesStatus = false
     if (statusFilter === "all") matchesStatus = true
-    else if (statusFilter === "online") matchesStatus = ["online", "possibly-dead", "connecting"].includes(agent.status)
-    else matchesStatus = agent.status === statusFilter
+    else if (statusFilter === "online") matchesStatus = ["online", "possibly-dead", "connecting"].includes(displayStatus)
+    else matchesStatus = displayStatus === statusFilter
     return matchesSearch && matchesStatus
   })
 
@@ -187,7 +222,7 @@ export function AgentDashboard({ onAgentSelect, selectedAgent, agentsData }: Age
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">Agent Management</h2>
           <Badge variant="outline" className="text-xs">
-            {agents.filter((a) => a.status === "online").length} / {agents.length} Online
+            {agents.filter((a) => getDisplayStatus(a) === "online").length} / {agents.length} Online
           </Badge>
         </div>
 
@@ -262,9 +297,9 @@ export function AgentDashboard({ onAgentSelect, selectedAgent, agentsData }: Age
                 <div className="w-20 text-muted-foreground truncate">{agent.user}</div>
 
                 <div className="flex items-center gap-2 ml-auto">
-                  {getStatusIcon(agent.status)}
-                  <Badge className={`${getStatusBadge(agent.status)} text-xs px-2 py-0`}>
-                    {agent.status === "possibly-dead" ? "dead?" : agent.status}
+                  {getStatusIcon(getDisplayStatus(agent))}
+                  <Badge className={`${getStatusBadge(getDisplayStatus(agent))} text-xs px-2 py-0`}>
+                    {getDisplayStatus(agent) === "possibly-dead" ? "dead?" : getDisplayStatus(agent)}
                   </Badge>
                 </div>
               </div>

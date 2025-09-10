@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AgentDashboard } from "@/components/agent-dashboard"
+import { AgentMgmtList } from "@/components/agent-mgmt-list"
+import { AgentMgmtEditor } from "@/components/agent-mgmt-editor"
 import { TerminalInterface } from "@/components/terminal-interface"
 import { ListenerDashboard } from "@/components/listener-dashboard"
 import { ListenerEditor } from "@/components/listener-editor"
@@ -62,6 +64,7 @@ export default function CommandControlPage() {
   const [listeners, setListeners] = useState<Listener[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [showNewListenerWizard, setShowNewListenerWizard] = useState(false)
+  const [selectedMgmtAgent, setSelectedMgmtAgent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true) // initial page load only
   const [fetching, setFetching] = useState(false) // background fetch state
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false) // disable periodic polling for now
@@ -359,7 +362,7 @@ export default function CommandControlPage() {
       <header className="border-b border-border bg-card px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="simpleJack.png" alt="Simple Jack" className="h-20 w-20" />
+            <img src="/simpleJack.png" alt="Simple Jack" className="h-20 w-20" />
             <h1 className="text-2xl font-bold text-foreground">Simple Jack C2</h1>
           </div>
           <div className="flex items-center gap-4">
@@ -378,6 +381,7 @@ export default function CommandControlPage() {
             <TabsList className="mx-4 mt-4">
               <TabsTrigger value="agents">Agents</TabsTrigger>
               <TabsTrigger value="listeners">Listeners</TabsTrigger>
+              <TabsTrigger value="agent-mgmt">Agent Mgmt</TabsTrigger>
             </TabsList>
 
             <TabsContent value="agents" className="flex-1 mt-4 mx-4">
@@ -393,6 +397,10 @@ export default function CommandControlPage() {
                 onListenerDelete={deleteListener}
                 onNewListener={() => setShowNewListenerWizard(true)}
               />
+            </TabsContent>
+
+            <TabsContent value="agent-mgmt" className="flex-1 mt-4 mx-4">
+              <AgentMgmtList selected={selectedMgmtAgent} onSelect={setSelectedMgmtAgent} />
             </TabsContent>
           </Tabs>
         </div>
@@ -427,6 +435,8 @@ export default function CommandControlPage() {
                 listener: a.listener,
               }))}
             />
+          ) : activeTab === "agent-mgmt" ? (
+            <AgentMgmtEditor selected={selectedMgmtAgent} />
           ) : showNewListenerWizard ? (
             <NewListenerWizard onComplete={handleWizardComplete} onCancel={handleWizardCancel} />
           ) : (

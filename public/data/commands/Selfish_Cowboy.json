@@ -24,7 +24,8 @@
       ],
       "preview": "ls [path] [-a]",
       "parser": "generic",
-      "help": "Lists the contents of the specified directory. Use -a to show hidden files."
+      "help": "Lists the contents of the specified directory. Use -a to show hidden files.",
+      "cape": ""
     },
     {
       "id": "dir",
@@ -171,7 +172,8 @@
       ],
       "preview": "load <capability>",
       "parser": "generic",
-      "help": "Loads a new capability module into the agent. Available capabilities include Token_Impersonation, Cred_Harvesting, Process_Injection, and others."
+      "help": "Loads a new capability module into the agent. Available capabilities include Token_Impersonation, Cred_Harvesting, Process_Injection, and others.",
+      "cape": "Loader"
     },
     {
       "id": "capes",
@@ -182,7 +184,8 @@
       "parameters": [],
       "preview": "capes",
       "parser": "generic",
-      "help": "Displays all capabilities currently loaded into the agent. Default capabilities include Loader, Console Execution, and Exit/Eat."
+      "help": "Displays all capabilities currently loaded into the agent. Default capabilities include Loader, Console Execution, and Exit/Eat.",
+      "cape": "Local Manager"
     },
     {
       "id": "agent_info",
@@ -193,9 +196,10 @@
       "parameters": [],
       "preview": "agent_info",
       "parser": "generic",
-      "help": "Shows comprehensive information about the agent including status, configuration, capabilities, and system details."
+      "help": "Shows comprehensive information about the agent including status, configuration, capabilities, and system details.",
+      "cape": "Local Manager"
     },
-        {
+    {
       "id": "remove",
       "name": "remove",
       "synopsis": "removes the agent from the listing and databse. DOES NOT FORCE EAT!",
@@ -212,7 +216,8 @@
       ],
       "preview": "remove <id>",
       "parser": "generic",
-      "help": "Removes the agent from the listing and databse. DOES NOT FORCE EAT!"
+      "help": "Removes the agent from the listing and databse. DOES NOT FORCE EAT!",
+      "cape": "Local Manager"
     }
   ]
 }

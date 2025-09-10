@@ -151,10 +151,11 @@ export const agentDb = {
   },
 
   updateStatus: (id: string, status: Agent["status"]): void => {
+    // Only update status; do NOT mutate last_seen_timestamp here.
     const stmt = db.prepare(
-      "UPDATE agents SET status = ?, last_seen_timestamp = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      "UPDATE agents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
-    stmt.run(status, Date.now(), id)
+    stmt.run(status, id)
   },
 
   delete: (id: string): boolean => {

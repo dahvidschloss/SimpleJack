@@ -122,6 +122,7 @@ interface CommandDefinition {
   preview: string
   parser: string
   help: string
+  cape?: string
 }
 
 interface CommandSet {
@@ -253,6 +254,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
   const [selectedFile, setSelectedFile] = useState<FileSystemItem | null>(null)
   const [commandAlert, setCommandAlert] = useState<string | null>(null)
   const [availableCommands, setAvailableCommands] = useState<CommandDefinition[]>([])
+  const [defaultCapes, setDefaultCapes] = useState<string[]>([])
   const [commandsLoaded, setCommandsLoaded] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -297,7 +299,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     if (selectedAgent) {
       const currentAgent = getCurrentAgent()
 
-      // Load structured command history from agent's terminalHistory
+      // Load structured command history from agent's terminalHistory (on agent switch only)
       if (currentAgent?.terminalHistory && Array.isArray(currentAgent.terminalHistory)) {
         const parsedHistory: CommandHistory[] = currentAgent.terminalHistory.map((historyItem: any) => ({
           commandId: historyItem.commandId || `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -414,7 +416,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       setHistory([])
       setStructuredCommandHistory([])
     }
-  }, [selectedAgent, agents])
+  }, [selectedAgent])
 
   useEffect(() => {
     const currentAgent = getCurrentAgent()
@@ -433,32 +435,26 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
           console.error("[v0] Failed to load commands:", error)
           setCommandsLoaded(false)
         })
+      // Load default capes for this base agent profile
+      fetch(`/api/agent-mgmt/agents/${encodeURIComponent(currentAgent.base_agent)}`)
+        .then(res => res.ok ? res.json() : Promise.reject(new Error('no agent info')))
+        .then(info => {
+          const list = Array.isArray(info?.capes) ? info.capes : []
+          const names = list.filter((c: any) => c && c.default === true).map((c: any) => String(c.name || '').toLowerCase()).filter(Boolean)
+          setDefaultCapes(names)
+        })
+        .catch(() => setDefaultCapes([]))
     } else {
       console.log("[v0] No agent selected or no base_agent property")
       setAvailableCommands([])
       setCommandsLoaded(false)
+      setDefaultCapes([])
     }
   }, [selectedAgent, agents])
 
   useEffect(() => {
-    if (selectedAgent) {
-      const currentAgent = getCurrentAgent()
-      const welcomeMessage: TerminalLine = {
-        id: Date.now().toString(),
-        type: "system",
-        content: `Connected to agent ${selectedAgent} (${currentAgent?.base_agent || "Unknown"})`,
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-      }
-      setHistory([welcomeMessage])
-    } else {
-      setHistory([])
-    }
-  }, [selectedAgent, agents])
+    // No-op: Welcome message is set in the initial loader effect above to avoid wiping history on refresh
+  }, [selectedAgent])
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -483,13 +479,24 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     }
   }, [commandHistory, selectedAgent])
 
+  const filterByLoadedCapes = (cmds: CommandDefinition[]): CommandDefinition[] => {
+    const agent = getCurrentAgent()
+    const loaded = new Set<string>([...defaultCapes, ...((agent?.loadedCommands || []).map((s) => String(s).toLowerCase()))])
+    if (!agent || loaded.size === 0) return cmds
+    return cmds.filter((c) => {
+      const cape = (c as any).cape ? String((c as any).cape).toLowerCase() : ""
+      if (!cape) return true
+      return loaded.has(cape)
+    })
+  }
+
   const handleCommandChange = (value: string) => {
     setCommand(value)
 
     if (value.trim() && commandsLoaded) {
       const hasSpace = value.includes(" ")
       if (!hasSpace) {
-        const filtered = availableCommands
+        const filtered = filterByLoadedCapes(availableCommands)
           .filter((cmd) => cmd.name.toLowerCase().startsWith(value.toLowerCase()))
           .map((cmd) => cmd.name)
         setSuggestions(filtered)
@@ -918,7 +925,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
               <span className="w-20 font-semibold">Integrity</span>
               <span className="flex-1 font-semibold">Description</span>
             </div>
-            {availableCommands.map((cmd) => (
+            {filterByLoadedCapes(availableCommands).map((cmd) => (
               <div key={cmd.id} className="flex gap-4 text-sm font-mono border-b border-border/30 pb-2">
                 <span className="w-16 text-primary font-semibold">{cmd.name}</span>
                 <span className="w-32 text-yellow-400 text-xs">
@@ -971,7 +978,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       return
     }
 
-    const commandExists = availableCommands.some((cmd) => cmd.name === baseCommand)
+    const commandExists = filterByLoadedCapes(availableCommands).some((cmd) => cmd.name === baseCommand)
 
     if (!commandExists) {
       const similarities = availableCommands.map((cmd) => ({
@@ -1385,7 +1392,7 @@ user      1234  0.1  0.5  12345  5678 pts/0    Ss   10:30   0:00 -bash`
   }
 
   return (
-    <div className="flex flex-col h-full max-h-screen">
+    <div className="flex flex-col h-full min-h-0">
       <div className="p-4 border-b border-border bg-card">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
@@ -1439,7 +1446,7 @@ user      1234  0.1  0.5  12345  5678 pts/0    Ss   10:30   0:00 -bash`
 
           <div
             ref={terminalRef}
-            className="flex-1 overflow-y-auto p-4 bg-card font-mono text-sm space-y-1 min-h-0 max-h-[calc(100vh-280px)]"
+            className="flex-1 overflow-y-auto p-4 bg-card font-mono text-sm space-y-1 min-h-0"
           >
             {history.map((line) => (
               <div key={line.id} className="flex gap-2 items-center">
