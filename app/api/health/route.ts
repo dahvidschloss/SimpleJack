@@ -45,7 +45,9 @@ export async function GET(request: NextRequest) {
       } catch {}
     }
 
-    return NextResponse.json({ session_key: newSession, ...(payload.Task ? { Task: payload.Task } : {}) })
+    const res = NextResponse.json({ session_key: newSession, ...(payload.Task ? { Task: payload.Task } : {}) })
+    try { res.headers.set('ETag', newSession) } catch {}
+    return res
   } catch (error) {
     console.error("health check error:", error)
     return NextResponse.json({ error: "server error" }, { status: 500 })

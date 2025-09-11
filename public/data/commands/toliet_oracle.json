@@ -63,6 +63,53 @@
       "parser": "generic",
       "help": "Removes the agent from the listing and databse. DOES NOT FORCE EAT!",
       "cape": "Manager"
+    },
+    {
+      "id": "powershell",
+      "name": "powershell",
+      "synopsis": "run a command using powershell. Will return the standard out of the command. Will not spawn a new process to do.",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "command",
+          "type": "string",
+          "default": "",
+          "required": true,
+          "description": "command you wish to run"
+        }
+      ],
+      "preview": "powershell <command>",
+      "parser": "generic",
+      "help": "run a command using powershell. Will return the standard out of the command. Will not spawn a new process to do.",
+      "cape": "Shell Commands"
+    },
+    {
+      "id": "set",
+      "name": "set",
+      "synopsis": "sets agent values",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "string",
+          "default": "",
+          "required": true,
+          "description": "parmeter you wish to change"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "default": "",
+          "required": false,
+          "description": "value of the parameter you want to change it to"
+        }
+      ],
+      "preview": "set <param> <value>",
+      "parser": "generic",
+      "help": "sets agent values",
+      "cape": "Manager"
     }
   ]
 }

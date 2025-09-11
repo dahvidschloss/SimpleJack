@@ -362,7 +362,7 @@ export default function CommandControlPage() {
       <header className="border-b border-border bg-card px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/simpleJack.png" alt="Simple Jack" className="h-20 w-20" />
+            <img src="/simpleJack.png" alt="Simple Jack" className="h-10 w-10" />
             <h1 className="text-2xl font-bold text-foreground">Simple Jack C2</h1>
           </div>
           <div className="flex items-center gap-4">

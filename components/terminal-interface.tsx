@@ -257,9 +257,10 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
   const [defaultCapes, setDefaultCapes] = useState<string[]>([])
   const [commandsLoaded, setCommandsLoaded] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  // Note: our Input component may not forward refs; avoid passing a ref to prevent warnings
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const [edrClassifications, setEdrClassifications] = useState<any>(null)
-  const [seenApiCommandIds, setSeenApiCommandIds] = useState<Set<string>>(new Set())
+  const seenApiCommandIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     fetch("/data/edr-classifications.json")
@@ -272,28 +273,27 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     return agents.find((agent) => agent.id === selectedAgent) || null
   }
 
-  // Listen for command results from page-level SSE (singleton); update terminal only on new results
+  // Listen for command results; track seen IDs in a ref to avoid update loops
   useEffect(() => {
-    setSeenApiCommandIds(new Set())
+    seenApiCommandIdsRef.current = new Set()
     if (!selectedAgent) return
     const onResult = (ev: any) => {
       try {
         const cmd = ev.detail
         if (!cmd || cmd.agent_id !== selectedAgent) return
         const id: string = String(cmd.id || `${cmd.command}-${cmd.time_tasked}`)
-        if (seenApiCommandIds.has(id)) return
-        const newSeen = new Set(seenApiCommandIds)
-        newSeen.add(id)
-        setSeenApiCommandIds(newSeen)
+        const seen = seenApiCommandIdsRef.current
+        if (seen.has(id)) return
+        seen.add(id)
         const time = new Date(cmd.time_completed || cmd.time_tasked || Date.now()).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
         const commandLine: TerminalLine = { id: `${id}-cmd`, type: 'command', content: `${cmd.command}${cmd.command_args ? ' ' + cmd.command_args : ''}`, timestamp: time }
         const resultLine: TerminalLine = { id: `${id}-out`, type: cmd.success ? 'output' : 'error', content: cmd.success ? (cmd.command_result || 'OK') : (cmd.error || 'Error'), timestamp: time }
-        setHistory((prev) => [...prev, commandLine, resultLine])
+        setHistory((prevH) => [...prevH, commandLine, resultLine])
       } catch {}
     }
     window.addEventListener('command:result', onResult as any)
     return () => window.removeEventListener('command:result', onResult as any)
-  }, [selectedAgent, seenApiCommandIds])
+  }, [selectedAgent])
 
   useEffect(() => {
     if (selectedAgent) {
@@ -413,8 +413,9 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
         setHistory([welcomeMessage])
       }
     } else {
-      setHistory([])
-      setStructuredCommandHistory([])
+      // Avoid redundant state churn when no agent is selected
+      if (history.length > 0) setHistory([])
+      if (structuredCommandHistory.length > 0) setStructuredCommandHistory([])
     }
   }, [selectedAgent])
 
@@ -450,7 +451,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       setCommandsLoaded(false)
       setDefaultCapes([])
     }
-  }, [selectedAgent, agents])
+  }, [selectedAgent])
 
   useEffect(() => {
     // No-op: Welcome message is set in the initial loader effect above to avoid wiping history on refresh
@@ -462,23 +463,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     }
   }, [history])
 
-  // Persist terminal lines per-agent to survive refresh/navigation
-  useEffect(() => {
-    if (selectedAgent) {
-      try { localStorage.setItem(`terminal-lines-${selectedAgent}`, JSON.stringify(history)) } catch {}
-    }
-  }, [history, selectedAgent])
-
-  useEffect(() => {
-    if (!selectedAgent) return
-    try {
-      const saved = localStorage.getItem(`terminal-lines-${selectedAgent}`)
-      if (saved) {
-        const lines = JSON.parse(saved)
-        if (Array.isArray(lines)) setHistory(lines)
-      }
-    } catch {}
-  }, [selectedAgent])
+  // Temporarily disable localStorage persistence/hydration to avoid update loops during debugging
 
   useEffect(() => {
     const savedHistory = localStorage.getItem(`terminal-history-${selectedAgent}`)
@@ -535,6 +520,10 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     const baseCommand = command.trim().split(" ")[0].toLowerCase()
     const args = command.trim().split(" ").slice(1)
     const currentAgent = getCurrentAgent()
+
+    try { console.log('[terminal] executeCommand', { selectedAgent, baseCommand, args }) } catch {}
+    const debugEcho: TerminalLine = { id: `${Date.now()}-dbg`, type: 'system', content: `Executing: ${command}`, timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
+    setHistory((prev) => [...prev, debugEcho])
 
     const newCommandHistory: CommandHistory = {
       commandId: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -897,6 +886,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     }
 
     if (baseCommand === "help") {
+      try { console.log('[terminal] render help') } catch {}
       if (!commandsLoaded || availableCommands.length === 0) {
         const noCommandsLine: TerminalLine = {
           id: (Date.now() + 1).toString(),
@@ -1006,24 +996,19 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     }
 
     const commandExists = filterByLoadedCapes(availableCommands).some((cmd) => cmd.name === baseCommand)
-
     if (!commandExists) {
-      const similarities = availableCommands.map((cmd) => ({
-        command: cmd.name,
-        similarity: calculateSimilarity(baseCommand, cmd.name),
-      }))
-
-      const bestMatch = similarities.reduce((best, current) => (current.similarity > best.similarity ? current : best))
-
-      if (bestMatch.similarity > 0.4) {
-        setCommandAlert(`Command doesn't exist, did you mean '${bestMatch.command}'?`)
+      const similarities = availableCommands.map((cmd) => ({ command: cmd.name, similarity: calculateSimilarity(baseCommand, cmd.name) }))
+      const bestMatch = similarities.reduce((best, current) => (current.similarity > best.similarity ? current : best), { command: '', similarity: 0 })
+      if (availableCommands.length > 0) {
+        if (bestMatch.similarity > 0.4) setCommandAlert(`Command doesn't exist, did you mean '${bestMatch.command}'?`)
+        else setCommandAlert(`Command '${baseCommand}' doesn't exist. Type 'help' to see available commands.`)
       } else {
-        setCommandAlert(`Command '${baseCommand}' doesn't exist. Type 'help' to see available commands.`)
+        setCommandAlert(null)
       }
-      return
+      // Continue to queue the task anyway
     }
 
-    if (commandExists) {
+    {
       const commandLine: TerminalLine = {
         id: Date.now().toString(),
         type: "command",
@@ -1048,6 +1033,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
 
       // Queue the task on the server; rely on SSE for results
       try {
+        console.log('[terminal] queue task', { agentId: selectedAgent, baseCommand, args })
         await fetch('/api/tasking/queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS agents (
     build TEXT,
     last_callback DATETIME NOT NULL,
     created_time DATETIME NOT NULL,
+    session_key TEXT,
     callback_interval INTEGER NOT NULL DEFAULT 60,
     jitter_value INTEGER NOT NULL DEFAULT 15,
     jitter_translate INTEGER NOT NULL,
@@ -71,6 +72,17 @@ CREATE TABLE IF NOT EXISTS commands (
     FOREIGN KEY (agent_id) REFERENCES agents (id) ON DELETE CASCADE
 );
 
+-- Simple per-agent task queue (FIFO by enqueued_at)
+CREATE TABLE IF NOT EXISTS queued_tasks (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    command TEXT NOT NULL,
+    args TEXT DEFAULT '',
+    parser TEXT DEFAULT 'generic',
+    enqueued_at DATETIME NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents (id) ON DELETE CASCADE
+);
+
 -- Sessions table for tracking active agent sessions
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -87,10 +99,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents (status);
 CREATE INDEX IF NOT EXISTS idx_agents_last_callback ON agents (last_callback);
+CREATE INDEX IF NOT EXISTS idx_agents_session_key ON agents (session_key);
 CREATE INDEX IF NOT EXISTS idx_commands_agent_id ON commands (agent_id);
 CREATE INDEX IF NOT EXISTS idx_commands_time_tasked ON commands (time_tasked);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions (agent_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions (is_active);
 
 -- No sample agents or listeners are seeded; UI/API will create them
-

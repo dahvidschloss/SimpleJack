@@ -16,6 +16,10 @@ export function initializeDatabase() {
   } catch (error) {
     console.error("Failed to initialize database:", error)
   }
+
+  // Best-effort, idempotent schema migrations for existing DBs
+  try { db.exec("ALTER TABLE agents ADD COLUMN session_key TEXT") } catch {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_agents_session_key ON agents (session_key)") } catch {}
 }
 
 // Agent operations
@@ -27,6 +31,7 @@ export interface Agent {
   build?: string
   last_callback: string
   created_time: string
+  session_key?: string
   callback_interval: number
   jitter_value: number
   jitter_translate: number
@@ -80,6 +85,15 @@ export interface Command {
   time_completed?: string
 }
 
+export interface QueuedTask {
+  id: string
+  agent_id: string
+  command: string
+  args: string
+  parser: string
+  enqueued_at: string
+}
+
 // Agent database operations
 export const agentDb = {
   getAll: (): Agent[] => {
@@ -95,13 +109,13 @@ export const agentDb = {
   create: (agent: Omit<Agent, "created_at" | "updated_at">): Agent => {
     const stmt = db.prepare(`
       INSERT INTO agents (
-        id, hostname, ip_addr, os, build, last_callback, created_time,
+        id, hostname, ip_addr, os, build, last_callback, created_time, session_key,
         callback_interval, jitter_value, jitter_translate, pid, user_context,
         base_agent, terminal_history, loaded_commands, cwd, last_queued_task,
         current_running_task, last_error_task, listener, work_hours, kill_date,
         edr, target_domain, last_error, default_shell, integrity_level,
         status, last_seen_timestamp
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     stmt.run(
@@ -112,6 +126,7 @@ export const agentDb = {
       agent.build,
       agent.last_callback,
       agent.created_time,
+      (agent as any).session_key || null,
       agent.callback_interval,
       agent.jitter_value,
       agent.jitter_translate,
@@ -162,6 +177,11 @@ export const agentDb = {
     const stmt = db.prepare("DELETE FROM agents WHERE id = ?")
     const info = stmt.run(id)
     return info.changes > 0
+  },
+
+  getBySessionKey: (sessionKey: string): Agent | null => {
+    const stmt = db.prepare("SELECT * FROM agents WHERE session_key = ?")
+    return stmt.get(sessionKey) as Agent | null
   },
 }
 
@@ -253,6 +273,33 @@ export const commandDb = {
 
     const getStmt = db.prepare("SELECT * FROM commands WHERE id = ?")
     return getStmt.get(command.id) as Command
+  },
+}
+
+// Task queue operations
+export const taskQueueDb = {
+  enqueue: (task: Omit<QueuedTask, "created_at">): QueuedTask => {
+    const stmt = db.prepare(`
+      INSERT INTO queued_tasks (
+        id, agent_id, command, args, parser, enqueued_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    stmt.run(task.id, task.agent_id, task.command, task.args, task.parser, task.enqueued_at)
+    const getStmt = db.prepare("SELECT * FROM queued_tasks WHERE id = ?")
+    return getStmt.get(task.id) as QueuedTask
+  },
+
+  getNextForAgent: (agentId: string): QueuedTask | null => {
+    const stmt = db.prepare(
+      "SELECT * FROM queued_tasks WHERE agent_id = ? ORDER BY enqueued_at ASC LIMIT 1",
+    )
+    return (stmt.get(agentId) as QueuedTask) || null
+  },
+
+  deleteById: (id: string): boolean => {
+    const stmt = db.prepare("DELETE FROM queued_tasks WHERE id = ?")
+    const info = stmt.run(id)
+    return info.changes > 0
   },
 }
 
