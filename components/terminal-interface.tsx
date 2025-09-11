@@ -462,6 +462,24 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     }
   }, [history])
 
+  // Persist terminal lines per-agent to survive refresh/navigation
+  useEffect(() => {
+    if (selectedAgent) {
+      try { localStorage.setItem(`terminal-lines-${selectedAgent}`, JSON.stringify(history)) } catch {}
+    }
+  }, [history, selectedAgent])
+
+  useEffect(() => {
+    if (!selectedAgent) return
+    try {
+      const saved = localStorage.getItem(`terminal-lines-${selectedAgent}`)
+      if (saved) {
+        const lines = JSON.parse(saved)
+        if (Array.isArray(lines)) setHistory(lines)
+      }
+    } catch {}
+  }, [selectedAgent])
+
   useEffect(() => {
     const savedHistory = localStorage.getItem(`terminal-history-${selectedAgent}`)
     if (savedHistory) {
@@ -607,12 +625,16 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
         "Process Management": ["kill", "jobs"],
       }
 
+      const loadedCaps = Array.isArray(currentAgent?.loadedCommands) ? currentAgent!.loadedCommands : []
+      const prettyDefaults = defaultCapes.map((n) => n ? n.charAt(0).toUpperCase() + n.slice(1) : n).filter(Boolean)
+      const combinedCaps = Array.from(new Map([...loadedCaps, ...prettyDefaults].map((s) => [String(s).toLowerCase(), String(s)])).values())
+
       const capesFormatted = (
         <div className="space-y-3">
           <div className="text-accent font-semibold">Loaded Capabilities:</div>
           <div className="space-y-3">
-            {currentAgent?.loadedCommands && currentAgent.loadedCommands.length > 0 ? (
-              currentAgent.loadedCommands.map((capability, index) => (
+            {combinedCaps && combinedCaps.length > 0 ? (
+              combinedCaps.map((capability, index) => (
                 <div key={index} className="space-y-1">
                   <div className="text-primary font-semibold">{capability}</div>
                   <div className="pl-4 text-sm">
@@ -628,7 +650,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
             )}
           </div>
           <div className="text-muted-foreground text-xs mt-4 pt-2 border-t border-border">
-            Total loaded capabilities: {currentAgent?.loadedCommands?.length || 0}
+            Total loaded capabilities: {combinedCaps.length}
           </div>
         </div>
       )
@@ -646,7 +668,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
         formatted: capesFormatted,
       }
 
-      newCommandHistory.command_result = `Loaded capabilities: ${currentAgent.loadedCommands?.join(", ") || "None"}`
+      newCommandHistory.command_result = `Loaded capabilities: ${combinedCaps.join(", ") || "None"}`
       setStructuredCommandHistory((prev) => [newCommandHistory, ...prev.slice(0, 49)])
 
       setHistory((prev) => [...prev, commandLine, capesLine])
@@ -805,17 +827,22 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
               <div className="space-y-1">
                 <div className="text-blue-400 font-semibold text-sm">Loaded Capabilities</div>
                 <div className="text-xs space-y-1 pl-2">
-                  {currentAgent?.loadedCommands && currentAgent.loadedCommands.length > 0 ? (
-                    currentAgent.loadedCommands.map((cape: string, index: number) => (
-                      <div key={index}>
-                        <span className="text-green-400">• {cape}</span>
+                  {(() => {
+                    const loaded = Array.isArray(currentAgent?.loadedCommands) ? currentAgent!.loadedCommands : []
+                    const prettyDefaults = defaultCapes.map((n) => n ? n.charAt(0).toUpperCase() + n.slice(1) : n).filter(Boolean)
+                    const combined = Array.from(new Map([...loaded, ...prettyDefaults].map((s) => [String(s).toLowerCase(), String(s)])).values())
+                    return combined.length > 0 ? (
+                      combined.map((cape: string, index: number) => (
+                        <div key={index}>
+                          <span className="text-green-400">• {cape}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div>
+                        <span className="text-muted-foreground">No capabilities loaded</span>
                       </div>
-                    ))
-                  ) : (
-                    <div>
-                      <span className="text-muted-foreground">No capabilities loaded</span>
-                    </div>
-                  )}
+                    )
+                  })()}
                 </div>
               </div>
 
@@ -1000,7 +1027,7 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       const commandLine: TerminalLine = {
         id: Date.now().toString(),
         type: "command",
-        content: command,
+        content: `$ ${command}`,
         timestamp: new Date().toLocaleTimeString("en-US", {
           hour12: false,
           hour: "2-digit",
@@ -1012,93 +1039,29 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       const taskLine: TerminalLine = {
         id: (Date.now() + 1).toString(),
         type: "system",
-        content: `Tasked ${baseCommand} at ${commandLine.timestamp}`,
+        content: `Tasked ${baseCommand}`,
         timestamp: commandLine.timestamp,
         status: "tasked" as const,
       }
 
       setHistory((prev) => [...prev, commandLine, taskLine])
 
-      // Simulate agent callback and response
-      setTimeout(() => {
-        setHistory((prev) =>
-          prev.map((line) =>
-            line.id === taskLine.id
-              ? {
-                  ...line,
-                  content: `Agent accepted task ${baseCommand} at ${commandLine.timestamp} awaiting response`,
-                  status: "accepted" as const,
-                }
-              : line,
-          ),
-        )
-
-        setTimeout(() => {
-          let resultContent = `Command '${baseCommand}' executed successfully`
-          let formatted: React.ReactNode | undefined
-
-          // Format ls command results
-          if (baseCommand === "ls") {
-            const mockFiles = ["Documents/", "Downloads/", "Pictures/", "config.txt", "readme.md", "script.sh"]
-            resultContent = mockFiles.join("\n")
-            formatted = (
-              <div className="space-y-1">
-                {mockFiles.map((file, index) => {
-                  const isDirectory = file.endsWith("/")
-                  const fileName = file.replace("/", "")
-                  return (
-                    <div key={index} className="flex items-center gap-2">
-                      {isDirectory ? (
-                        <>
-                          <span className="text-blue-400">📁</span>
-                          <span className="text-blue-300">{fileName}</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-gray-400">📄</span>
-                          <span className="text-gray-200">{fileName}</span>
-                        </>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          }
-
-          const responseTime = new Date().toLocaleTimeString("en-US", {
-            hour12: false,
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })
-
-          const resultLine: TerminalLine = {
-            id: (Date.now() + 2).toString(),
-            type: "output",
-            content: resultContent,
-            timestamp: responseTime,
-            formatted: formatted,
-          }
-
-          newCommandHistory.command_result = resultContent
-          newCommandHistory.success = true
-          setStructuredCommandHistory((prev) => [newCommandHistory, ...prev.slice(0, 49)])
-
-          setHistory((prev) => [
-            ...prev.map((line) =>
-              line.id === taskLine.id
-                ? {
-                    ...line,
-                    content: `Agent returned ${baseCommand} results at ${responseTime}:`,
-                    status: "completed" as const,
-                  }
-                : line,
-            ),
-            resultLine,
-          ])
-        }, 2000)
-      }, 1500)
+      // Queue the task on the server; rely on SSE for results
+      try {
+        await fetch('/api/tasking/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: selectedAgent, command: baseCommand, args: args.join(' ') }),
+        })
+      } catch (e) {
+        const errLine: TerminalLine = {
+          id: (Date.now() + 2).toString(),
+          type: 'error',
+          content: `Failed to queue task: ${(e as any)?.message || 'network error'}`,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        }
+        setHistory((prev) => [...prev, errLine])
+      }
     }
 
     setCommand("")
