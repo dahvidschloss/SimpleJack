@@ -262,6 +262,10 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
   const [edrClassifications, setEdrClassifications] = useState<any>(null)
   const seenApiCommandIdsRef = useRef<Set<string>>(new Set())
 
+  // Render helper: preserve newlines and spacing for plain strings
+  const renderPre = (n: any): React.ReactNode =>
+    typeof n === 'string' ? <pre className="whitespace-pre-wrap break-words m-0">{n}</pre> : n
+
   useEffect(() => {
     fetch("/data/edr-classifications.json")
       .then((res) => res.json())
@@ -1422,13 +1426,13 @@ user      1234  0.1  0.5  12345  5678 pts/0    Ss   10:30   0:00 -bash`
                 >
                   {line.type === "task" && line.taskStatus === TaskStatus.COMPLETED && line.result ? (
                     <div className="space-y-1">
-                      <div>{line.content}</div>
+                      <div>{renderPre(line.content)}</div>
                       <div className="text-foreground pl-4 border-l-2 border-muted">
-                        {line.formatted || line.result}
+                        {renderPre(line.formatted || line.result)}
                       </div>
                     </div>
                   ) : (
-                    line.formatted || line.content
+                    renderPre(line.formatted || line.content)
                   )}
                 </div>
               </div>

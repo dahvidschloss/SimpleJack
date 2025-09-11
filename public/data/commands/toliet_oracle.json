@@ -110,6 +110,26 @@
       "parser": "generic",
       "help": "sets agent values",
       "cape": "Manager"
+    },
+    {
+      "id": "exit",
+      "name": "exit",
+      "synopsis": "a command that will exit the process and kill the agent",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "eat",
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "if boolean exist then it will eat itself deleting the file on disk"
+        }
+      ],
+      "preview": "exit [eat]",
+      "parser": "generic",
+      "help": "Exits the process and kills the agent has the ability to eat the binary if the paramter is there ",
+      "cape": "Manager"
     }
   ]
 }
