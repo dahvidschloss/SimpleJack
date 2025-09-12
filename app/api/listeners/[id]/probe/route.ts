@@ -81,7 +81,7 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
     const protocol = String(l.protocol).toLowerCase()
     const port = Number(l.port)
     const bindHost = l.bind_address || "0.0.0.0"
-    const publicHost = (l.public_dns && l.public_dns.trim()) || ip_addresses[0]
+    const publicHost = ((l.public_dns || "").replace(/\s+/g, "").trim()) || ip_addresses[0]
     const getEndpoints: string[] = config?.http?.get_endpoints || ["/"]
     const postEndpoints: string[] = config?.http?.post_endpoints || ["/"]
     const successStatus = config?.http?.success_status || 204

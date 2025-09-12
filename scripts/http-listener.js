@@ -70,7 +70,15 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
           const path = urlObj.pathname || url
           if (path === pollPath) {
             // Polling requires a valid session token
-            let sessionToken = String((req.headers['if-none-match'] || '')).replace(/^"|"$/g, '')
+            //let sessionToken = String((req.headers['if-none-match'] || '')).replace(/^"|"$/g, '')
+            let sessionToken = String(
+              (
+                req.headers['session'] ||
+                req.headers['session-key'] ||
+                req.headers['etag'] ||
+                req.headers['x-request-id']
+              )
+            ).replace(/^"|"$/g, '')
             if (!sessionToken) {
               try {
                 const parsed = JSON.parse(body || '{}')
@@ -152,7 +160,16 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
             // Distinguish results POST (session header + task_result) from first-time registration
             let parsed = {}
             try { parsed = JSON.parse(body || '{}') } catch {}
-            const sessionToken = String((req.headers['if-none-match'] || '')).replace(/^"|"$/g, '')
+            //const sessionToken = String((req.headers['if-none-match'] || '')).replace(/^"|"$/g, '')
+            let sessionToken = String(
+              (
+                req.headers['session'] ||
+                req.headers['session-key'] ||
+                req.headers['etag'] ||
+                req.headers['x-request-id']
+              )
+              
+            ).replace(/^"|"$/g, '')
             const hasResult = Object.prototype.hasOwnProperty.call(parsed, 'task_result') || Object.prototype.hasOwnProperty.call(parsed, 'result')
             if (hasResult && sessionToken) {
               const sess = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND is_active = 1').get(sessionToken)
@@ -226,6 +243,7 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
             const hostname = String(parsed.hostname || 'unknown')
             const ipArr = Array.isArray(parsed.ip_addr) ? parsed.ip_addr : (parsed.ip_addr ? [String(parsed.ip_addr)] : [])
             const edr = Array.isArray(parsed.edr) ? parsed.edr : (parsed.edr ? [String(parsed.edr)] : [])
+            const edrJson = JSON.stringify(edr)
             const os = String(parsed.os || 'unknown')
             const build = parsed.build ? String(parsed.build) : null
             const cbInterval = Number(parsed.callback_interval || parsed.interval || 60)
@@ -269,7 +287,7 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
               name,
               '24/7',
               null,
-              edr,
+              edrJson,
               '',
               '',
               defShell,
@@ -366,9 +384,12 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
         res.writeHead(404)
         res.end()
       } catch (e) {
+        try {
+          console.error(`[http ${name}] error handling ${req.method} ${req.url}:`, e && e.stack ? e.stack : e)
+        } catch {}
         updateActivity(id, false)
-        res.writeHead(500)
-        res.end()
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        try { res.end(JSON.stringify({ ok: false, error: (e && e.message) ? e.message : 'internal_error' })) } catch { res.end() }
       }
     })
   })
