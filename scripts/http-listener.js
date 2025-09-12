@@ -225,6 +225,7 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
             const aid = randomUUID()
             const hostname = String(parsed.hostname || 'unknown')
             const ipArr = Array.isArray(parsed.ip_addr) ? parsed.ip_addr : (parsed.ip_addr ? [String(parsed.ip_addr)] : [])
+            const edr = Array.isArray(parsed.edr) ? parsed.edr : (parsed.edr ? [String(parsed.edr)] : [])
             const os = String(parsed.os || 'unknown')
             const build = parsed.build ? String(parsed.build) : null
             const cbInterval = Number(parsed.callback_interval || parsed.interval || 60)
@@ -268,7 +269,7 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
               name,
               '24/7',
               null,
-              '[]',
+              edr,
               '',
               '',
               defShell,
