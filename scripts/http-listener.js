@@ -189,7 +189,8 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
               const low = raw.trim().toLowerCase()
               const isBool = low === 'true' || low === 'false'
               const success = isBool ? low === 'true' : true
-              const command_result = isBool ? '' : raw
+              // Preserve original text so UI parsers (generic/boolean) can decide how to render
+              const command_result = raw
               const error = success ? '' : (command_result || 'Command failed')
               const cmdId = randomUUID()
               db.prepare(`INSERT INTO commands (id, agent_id, command, command_args, command_result, success, error, time_tasked, time_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -332,7 +333,7 @@ async function startHttpListener({ id, host = '0.0.0.0', port, name, config = {}
               const low = raw.trim().toLowerCase()
               const isBool = low === 'true' || low === 'false'
               const success = isBool ? low === 'true' : true
-              const command_result = isBool ? '' : raw
+              const command_result = raw
               const error = success ? '' : (command_result || 'Command failed')
               const cmdId = randomUUID()
               db.prepare(`INSERT INTO commands (id, agent_id, command, command_args, command_result, success, error, time_tasked, time_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)

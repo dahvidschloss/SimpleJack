@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { parseCommandResult, type TerminalParserContext } from "./terminal-parsers"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
@@ -262,6 +263,209 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
   const [edrClassifications, setEdrClassifications] = useState<any>(null)
   const seenApiCommandIdsRef = useRef<Set<string>>(new Set())
 
+  // Helper: find a command definition (by name) for the currently selected agent
+  const findCommandDef = (name: string): CommandDefinition | undefined => {
+    const lower = String(name || '').toLowerCase()
+    return availableCommands.find((c) => String(c.name || '').toLowerCase() === lower)
+  }
+
+  // Helper: get parser identifier for a command, default to 'generic'
+  const getParserFor = (name: string): string => {
+    const def = findCommandDef(name)
+    const p = (def?.parser || 'generic').toString().toLowerCase().trim()
+    return p || 'generic'
+  }
+
+  // Shared pretty renderer for agent_info panel (also used in local command path)
+  const renderAgentInfoPanel = (currentAgent: Agent | null): React.ReactNode => {
+    // Note: this mirrors the JSX used in the 'agent_info' command path below
+    const getEdrColor = (edr: string) => {
+      if (!edrClassifications) return 'text-foreground'
+      const classification = edrClassifications[edr]
+      if (!classification) return 'text-foreground'
+      switch (classification.status) {
+        case 'danger':
+          return 'text-red-400 border border-red-400 px-1 rounded'
+        case 'warning':
+          return 'text-yellow-400 border border-yellow-400 px-1 rounded'
+        case 'good':
+          return 'text-green-400 border border-green-400 px-1 rounded'
+        default:
+          return 'text-foreground'
+      }
+    }
+
+    // Combine default capes + loaded caps for display
+    const loaded = Array.isArray(currentAgent?.loadedCommands) ? currentAgent!.loadedCommands : []
+    const prettyDefaults = defaultCapes
+      .map((n) => (n ? n.charAt(0).toUpperCase() + n.slice(1) : n))
+      .filter(Boolean)
+    const combined = Array.from(
+      new Map([...loaded, ...prettyDefaults].map((s) => [String(s).toLowerCase(), String(s)])).values(),
+    )
+
+    return (
+      <div className="space-y-4">
+        <div className="text-accent font-semibold text-lg">Agent Information</div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <div className="text-blue-400 font-semibold text-sm">Basic Information</div>
+              <div className="text-xs space-y-1 pl-2">
+                <div>
+                  <span className="text-muted-foreground">Agent ID:</span>{' '}
+                  <span className="text-primary font-mono">{currentAgent?.id}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Hostname:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.hostname}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">IP Address:</span>{' '}
+                  <div className="text-foreground">
+                    {Array.isArray(currentAgent?.ip)
+                      ? currentAgent!.ip.map((ip: string, index: number) => <div key={index}>{ip}</div>)
+                      : (currentAgent as any)?.ip}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Operating System:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.os}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Build Version:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.build || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Default Shell:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.defaultShell || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Base Agent:</span>{' '}
+                  <span className="text-yellow-400">{currentAgent?.base_agent}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-blue-400 font-semibold text-sm">Process Information</div>
+              <div className="text-xs space-y-1 pl-2">
+                <div>
+                  <span className="text-muted-foreground">Process ID:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.pid}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">User Context:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.user}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Integrity Level:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.IntegrityLevel || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Current Directory:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.cwd || 'Unknown'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-blue-400 font-semibold text-sm">Security Products</div>
+              <div className="text-xs space-y-1 pl-2">
+                <div>
+                  <span className="text-muted-foreground">EDR/AV:</span>
+                  {currentAgent?.edr ? (
+                    <div className="ml-2 space-y-1">
+                      {(Array.isArray(currentAgent.edr) ? currentAgent.edr : [currentAgent.edr]).map((edr: any, index: number) => (
+                        <div key={index}>
+                          <span className={getEdrColor(String(edr).trim())}>{String(edr).trim()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-foreground ml-1">None detected</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <div className="text-blue-400 font-semibold text-sm">Listener Information</div>
+              <div className="text-xs space-y-1 pl-2">
+                <div>
+                  <span className="text-muted-foreground">Listener:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.listener || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Protocol:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.listenerProtocol || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Port:</span>{' '}
+                  <span className="text-foreground">{currentAgent?.listenerPort || 'Unknown'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-blue-400 font-semibold text-sm">Loaded Capabilities</div>
+              <div className="text-xs space-y-1 pl-2">
+                {combined.length > 0 ? (
+                  combined.map((cape: string, index: number) => (
+                    <div key={index}>
+                      <span className="text-green-400">• {cape}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div>
+                    <span className="text-muted-foreground">No capabilities loaded</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Parser implementations: convert result text into TerminalLine props
+  const parseResultByParser = (
+    parser: string,
+    cmd: { command: string; command_args?: string; command_result?: string; success?: boolean; error?: string; id?: string; time_completed?: string; time_tasked?: string },
+    timestamp: string,
+  ): { type: TerminalLine["type"]; content: string; formatted?: React.ReactNode } => {
+    const raw = String(cmd.command_result || '')
+    const err = String(cmd.error || '')
+    const success = !!cmd.success
+    const base = parser || 'generic'
+    switch (base) {
+      case 'boolean': {
+        // Normalize common boolean representations
+        const text = raw.trim().toLowerCase()
+        const val = text === 'true' || text === '1' || (success && !text) // allow server to flag success
+        return { type: val ? 'output' : 'error', content: val ? 'OK' : (err || 'false') }
+      }
+      case 'file': {
+        // Update file explorer from output (expects ls-like output)
+        try { updateFileSystemFromLs(raw) } catch {}
+        const formatted = formatLsOutput(raw)
+        return { type: success ? 'output' : 'error', content: raw || (success ? 'OK' : err || 'Error'), formatted }
+      }
+      case 'agent_info': {
+        const formatted = renderAgentInfoPanel(getCurrentAgent())
+        return { type: 'output', content: 'Agent information displayed', formatted }
+      }
+      case 'generic':
+      default: {
+        return { type: success ? 'output' : 'error', content: raw || (success ? 'OK' : err || 'Error') }
+      }
+    }
+  }
+
   // Render helper: preserve newlines and spacing for plain strings
   const renderPre = (n: any): React.ReactNode =>
     typeof n === 'string' ? <pre className="whitespace-pre-wrap break-words m-0">{n}</pre> : n
@@ -291,13 +495,30 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
         seen.add(id)
         const time = new Date(cmd.time_completed || cmd.time_tasked || Date.now()).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
         const commandLine: TerminalLine = { id: `${id}-cmd`, type: 'command', content: `${cmd.command}${cmd.command_args ? ' ' + cmd.command_args : ''}`, timestamp: time }
-        const resultLine: TerminalLine = { id: `${id}-out`, type: cmd.success ? 'output' : 'error', content: cmd.success ? (cmd.command_result || 'OK') : (cmd.error || 'Error'), timestamp: time }
+        const parser = getParserFor(String(cmd.command || ''))
+        const ctx: TerminalParserContext = { currentAgent: getCurrentAgent(), defaultCapes, edrClassifications }
+        const parsed = parseCommandResult(parser, cmd, ctx)
+        const resultLine: TerminalLine = { id: `${id}-out`, type: parsed.type, content: parsed.content, timestamp: time, formatted: parsed.formatted }
+        if (parsed.fileItems && parsed.fileItems.length > 0) {
+          const currentPath = currentDirectory
+          const items = parsed.fileItems.map((it) => ({
+            name: it.name,
+            type: it.type,
+            permissions: it.permissions,
+            owner: it.owner,
+            group: it.group,
+            size: it.size,
+            modified: it.modified,
+            path: `${currentPath}/${it.name}`,
+          }))
+          setFileSystem((prev) => ({ ...prev, [currentPath]: items }))
+        }
         setHistory((prevH) => [...prevH, commandLine, resultLine])
       } catch {}
     }
     window.addEventListener('command:result', onResult as any)
     return () => window.removeEventListener('command:result', onResult as any)
-  }, [selectedAgent])
+  }, [selectedAgent, availableCommands, defaultCapes, edrClassifications, currentDirectory])
 
   useEffect(() => {
     if (selectedAgent) {
@@ -459,6 +680,22 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
 
   useEffect(() => {
     // No-op: Welcome message is set in the initial loader effect above to avoid wiping history on refresh
+  }, [selectedAgent])
+
+  // Reload command definitions when the editor updates them
+  useEffect(() => {
+    const handler = (ev: any) => {
+      const current = getCurrentAgent()
+      const base = current?.base_agent
+      const updated = ev?.detail?.name
+      if (base && updated && String(base).toLowerCase() === String(updated).toLowerCase()) {
+        loadCommandDefinitions(base)
+          .then((commands) => { setAvailableCommands(commands); setCommandsLoaded(true) })
+          .catch(() => setCommandsLoaded(false))
+      }
+    }
+    window.addEventListener('commands:updated', handler as any)
+    return () => window.removeEventListener('commands:updated', handler as any)
   }, [selectedAgent])
 
   useEffect(() => {

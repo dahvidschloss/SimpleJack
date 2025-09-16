@@ -110,12 +110,14 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
     setError(null)
     setSavedOk(false)
     try {
-      const payload = { commands: commands.map(c => ({ ...c, parser: "generic" })) }
+      // Preserve the parser field as edited instead of forcing 'generic'
+      const payload = { commands }
       const res = await fetch(`/api/agent-mgmt/${encodeURIComponent(selected)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       if (!res.ok) throw new Error("Save failed (commands)")
       const infoRes = await fetch(`/api/agent-mgmt/agents/${encodeURIComponent(selected)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: agentLanguage, capes }) })
       if (!infoRes.ok) throw new Error("Save failed (agent info)")
       setSavedOk(true)
+      try { window.dispatchEvent(new CustomEvent('commands:updated', { detail: { name: selected } })) } catch {}
     } catch {
       setError("Failed to save commands")
     } finally {
