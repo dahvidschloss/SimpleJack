@@ -107,7 +107,7 @@
         }
       ],
       "preview": "set <param> <value>",
-      "parser": "generic",
+      "parser": "boolean",
       "help": "sets agent values",
       "cape": "Manager"
     },
@@ -127,7 +127,7 @@
         }
       ],
       "preview": "exit [eat]",
-      "parser": "generic",
+      "parser": "boolean",
       "help": "Exits the process and kills the agent has the ability to eat the binary if the paramter is there ",
       "cape": "Manager"
     }
