@@ -226,6 +226,7 @@ function Run-Set {
     'interval' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
     'callback' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
     'callback_interval' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
+    'sleep' { try { $script:callbackInterval = [int]$value; return 'true' } catch { return 'false' } }
     default { return 'false' }
   }
 }
