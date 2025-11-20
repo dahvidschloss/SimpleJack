@@ -1,0 +1,21 @@
+{
+  "name": "Goblin_Garbage",
+  "language": "c++",
+  "capes": [
+    {
+      "name": "loader",
+      "default": true,
+      "description": "Function to load new capabilities"
+    },
+    {
+      "name": "exit/eat",
+      "default": true,
+      "description": "Function to exit the process and/or eat (self-delete)"
+    },
+    {
+      "name": "Basics",
+      "default": true,
+      "description": "Basic settings like set callback interval or jitter"
+    }
+  ]
+}

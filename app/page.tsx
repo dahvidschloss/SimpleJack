@@ -229,13 +229,21 @@ export default function CommandControlPage() {
           window.dispatchEvent(new CustomEvent('command:result', { detail: data }))
         } catch {}
       }
+      const onTaskDispatch = (ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data)
+          window.dispatchEvent(new CustomEvent('task:dispatched', { detail: data }))
+        } catch {}
+      }
       es.addEventListener('agents:refresh', onAgents as any)
       es.addEventListener('command:result', onCommand as any)
+      es.addEventListener('task:dispatched', onTaskDispatch as any)
       return () => {
         cancelled = true
         window.removeEventListener('agents:refresh', onRefresh)
         es.removeEventListener('agents:refresh', onAgents as any)
         es.removeEventListener('command:result', onCommand as any)
+        es.removeEventListener('task:dispatched', onTaskDispatch as any)
       }
     } catch {
       return () => { cancelled = true; window.removeEventListener('agents:refresh', onRefresh) }

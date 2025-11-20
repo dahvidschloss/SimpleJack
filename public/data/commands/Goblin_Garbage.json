@@ -1,0 +1,103 @@
+{
+  "commands": [
+    {
+      "id": "load",
+      "name": "load",
+      "synopsis": "Load new capabilities into the agent",
+      "min_integrity": "medium",
+      "opsec": "medium",
+      "parameters": [
+        {
+          "name": "capability",
+          "type": "string",
+          "default": "",
+          "required": true,
+          "description": "Name of the capability to load (e.g., Token_Impersonation, Cred_Harvesting)"
+        }
+      ],
+      "preview": "load <capability>",
+      "parser": "generic",
+      "help": "Loads a new capability module into the agent. Available capabilities include Token_Impersonation, Cred_Harvesting, Process_Injection, and others.",
+      "cape": "loader"
+    },
+    {
+      "id": "agent_info",
+      "name": "agent_info",
+      "synopsis": "",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [],
+      "preview": "agent_info",
+      "parser": "generic",
+      "help": "Shows comprehensive information about the agent including status, configuration, capabilities, and system details.",
+      "cape": "Basics"
+    },
+    {
+      "id": "remove",
+      "name": "remove",
+      "synopsis": "removes the agent from the listing and databse. DOES NOT FORCE EAT!",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "default": "",
+          "required": false,
+          "description": "First 8 items in the ID"
+        }
+      ],
+      "preview": "remove <id>",
+      "parser": "generic",
+      "help": "removes the agent from the listing and databse. DOES NOT FORCE EAT!",
+      "cape": "Basics"
+    },
+    {
+      "id": "set",
+      "name": "set",
+      "synopsis": "set a value",
+      "min_integrity": "low",
+      "opsec": "safe",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "string",
+          "default": "",
+          "required": false,
+          "description": "what param to set"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "default": "",
+          "required": false,
+          "description": "what value to se to"
+        }
+      ],
+      "preview": "set <param> <value>",
+      "parser": "boolean",
+      "help": "set a value in the config",
+      "cape": "Basics"
+    },
+    {
+      "id": "shell",
+      "name": "shell",
+      "synopsis": "execute a shell ",
+      "min_integrity": "low",
+      "opsec": "unsafe",
+      "parameters": [
+        {
+          "name": "impersonate",
+          "type": "string",
+          "default": "-i",
+          "required": false,
+          "description": ""
+        }
+      ],
+      "preview": "shell -i   <command>",
+      "parser": "generic",
+      "help": "",
+      "cape": "Basics"
+    }
+  ]
+}

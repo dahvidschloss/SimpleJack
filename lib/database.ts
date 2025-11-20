@@ -296,9 +296,22 @@ export const taskQueueDb = {
     return (stmt.get(agentId) as QueuedTask) || null
   },
 
+  getAllForAgent: (agentId: string): QueuedTask[] => {
+    const stmt = db.prepare("SELECT * FROM queued_tasks WHERE agent_id = ? ORDER BY enqueued_at ASC")
+    return stmt.all(agentId) as QueuedTask[]
+  },
+
   deleteById: (id: string): boolean => {
     const stmt = db.prepare("DELETE FROM queued_tasks WHERE id = ?")
     const info = stmt.run(id)
+    return info.changes > 0
+  },
+
+  deleteByIds: (ids: string[]): boolean => {
+    if (!ids || ids.length === 0) return false
+    const placeholders = ids.map(() => "?").join(", ")
+    const stmt = db.prepare(`DELETE FROM queued_tasks WHERE id IN (${placeholders})`)
+    const info = stmt.run(...ids)
     return info.changes > 0
   },
 }

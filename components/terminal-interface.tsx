@@ -481,7 +481,34 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
     return agents.find((agent) => agent.id === selectedAgent) || null
   }
 
-  // Listen for command results; track seen IDs in a ref to avoid update loops
+  const formatTime = (value: string | number | Date): string =>
+    new Date(value).toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+
+  const formatDate = (value: string | number | Date): string =>
+    new Date(value).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })
+
+  const upsertTaskLine = (taskId: string, build: (existing: TerminalLine | null) => TerminalLine | null) => {
+    setHistory((prev) => {
+      const idx = prev.findIndex((l) => l.id === taskId)
+      const current = idx >= 0 ? prev[idx] : null
+      const updated = build(current)
+      if (!updated) return prev
+      const next = [...prev]
+      if (idx >= 0) {
+        next[idx] = updated
+      } else {
+        next.push(updated)
+      }
+      return next
+    })
+  }
+
+  // Listen for command results; update existing task line instead of appending duplicates
   useEffect(() => {
     seenApiCommandIdsRef.current = new Set()
     if (!selectedAgent) return
@@ -490,15 +517,11 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
         const cmd = ev.detail
         if (!cmd || cmd.agent_id !== selectedAgent) return
         const id: string = String(cmd.id || `${cmd.command}-${cmd.time_tasked}`)
-        const seen = seenApiCommandIdsRef.current
-        if (seen.has(id)) return
-        seen.add(id)
-        const time = new Date(cmd.time_completed || cmd.time_tasked || Date.now()).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        const commandLine: TerminalLine = { id: `${id}-cmd`, type: 'command', content: `${cmd.command}${cmd.command_args ? ' ' + cmd.command_args : ''}`, timestamp: time }
-        const parser = getParserFor(String(cmd.command || ''))
+        const parser = getParserFor(String(cmd.command || ""))
         const ctx: TerminalParserContext = { currentAgent: getCurrentAgent(), defaultCapes, edrClassifications }
         const parsed = parseCommandResult(parser, cmd, ctx)
-        const resultLine: TerminalLine = { id: `${id}-out`, type: parsed.type, content: parsed.content, timestamp: time, formatted: parsed.formatted }
+        const time = formatTime(cmd.time_completed || cmd.time_tasked || Date.now())
+        const commandText = `${cmd.command}${cmd.command_args ? " " + cmd.command_args : ""}`.trim()
         if (parsed.fileItems && parsed.fileItems.length > 0) {
           const currentPath = currentDirectory
           const items = parsed.fileItems.map((it) => ({
@@ -513,12 +536,51 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
           }))
           setFileSystem((prev) => ({ ...prev, [currentPath]: items }))
         }
-        setHistory((prevH) => [...prevH, commandLine, resultLine])
+        upsertTaskLine(id, (existing) => ({
+          id,
+          type: "task",
+          content: `Tasked Results for ${commandText}`,
+          timestamp: time,
+          taskStatus: TaskStatus.COMPLETED,
+          command: commandText,
+          result: parsed.content,
+          formatted: parsed.formatted,
+          date: existing?.date || formatDate(cmd.time_tasked || cmd.time_completed || Date.now()),
+        }))
       } catch {}
     }
-    window.addEventListener('command:result', onResult as any)
-    return () => window.removeEventListener('command:result', onResult as any)
+    window.addEventListener("command:result", onResult as any)
+    return () => window.removeEventListener("command:result", onResult as any)
   }, [selectedAgent, availableCommands, defaultCapes, edrClassifications, currentDirectory])
+
+  // Mark tasks as dispatched when the agent picks them up
+  useEffect(() => {
+    if (!selectedAgent) return
+    const onDispatched = (ev: any) => {
+      try {
+        const { agent_id, tasks, time } = ev.detail || {}
+        if (!tasks || agent_id !== selectedAgent) return
+        const ts = time ? formatTime(time) : formatTime(Date.now())
+        tasks.forEach((t: any) => {
+          const commandText = `${t.TaskCMD || ""}${t.TaskArgument ? " " + t.TaskArgument : ""}`.trim()
+          const id = t.TaskID || `${commandText}-${time || Date.now()}`
+          upsertTaskLine(id, (existing) => ({
+            id,
+            type: "task",
+            content: `Tasked agent: ${commandText || "task"}`,
+            timestamp: ts,
+            date: existing?.date || formatDate(time || Date.now()),
+            taskStatus: TaskStatus.ACCEPTED,
+            command: commandText,
+            result: existing?.result,
+            formatted: existing?.formatted,
+          }))
+        })
+      } catch {}
+    }
+    window.addEventListener("task:dispatched", onDispatched as any)
+    return () => window.removeEventListener("task:dispatched", onDispatched as any)
+  }, [selectedAgent])
 
   useEffect(() => {
     if (selectedAgent) {
@@ -642,6 +704,51 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       if (history.length > 0) setHistory([])
       if (structuredCommandHistory.length > 0) setStructuredCommandHistory([])
     }
+  }, [selectedAgent])
+
+  // Refresh terminal history from persisted command records so task lines survive reloads
+  useEffect(() => {
+    if (!selectedAgent) return
+
+    const currentAgent = getCurrentAgent()
+    const welcomeMessage: TerminalLine = {
+      id: `welcome-${selectedAgent}`,
+      type: "system",
+      content: `Connected to agent ${selectedAgent} (${currentAgent?.base_agent || "Unknown"})`,
+      timestamp: formatTime(Date.now()),
+    }
+
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/commands?agentId=${encodeURIComponent(selectedAgent)}`)
+        const cmds: any[] = res.ok ? await res.json() : []
+        const sorted = [...cmds].sort(
+          (a, b) =>
+            new Date(a.time_tasked || a.time_completed || 0).getTime() -
+            new Date(b.time_tasked || b.time_completed || 0).getTime(),
+        )
+        const lines: TerminalLine[] = [welcomeMessage]
+        sorted.forEach((cmd) => {
+          const commandText = `${cmd.command}${cmd.command_args ? " " + cmd.command_args : ""}`.trim()
+          const resultText = cmd.success ? cmd.command_result || "OK" : cmd.error || cmd.command_result || "Command failed"
+          lines.push({
+            id: cmd.id,
+            type: "task",
+            content: `Tasked Results for ${commandText}`,
+            timestamp: formatTime(cmd.time_tasked || cmd.time_completed || Date.now()),
+            date: formatDate(cmd.time_tasked || cmd.time_completed || Date.now()),
+            taskStatus: TaskStatus.COMPLETED,
+            command: commandText,
+            result: resultText,
+          })
+        })
+        setHistory(lines)
+      } catch {
+        setHistory([welcomeMessage])
+      }
+    }
+
+    load()
   }, [selectedAgent])
 
   useEffect(() => {
