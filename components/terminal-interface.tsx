@@ -107,10 +107,15 @@ interface FileSystemState {
 
 interface CommandParam {
   name: string
-  type: "string" | "boolean"
+  label?: string
+  flag?: string
+  input_type?: "string" | "boolean" | "integer" | "path" | "enum" | "json"
+  type?: "string" | "boolean" // legacy
   default?: any
   required?: boolean
   description?: string
+  choices?: string[]
+  expects_value?: boolean
 }
 
 interface CommandDefinition {
@@ -1295,7 +1300,15 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
                 <span className="w-16 text-primary font-semibold">{cmd.name}</span>
                 <span className="w-32 text-yellow-400 text-xs">
                   {cmd.parameters.length > 0
-                    ? cmd.parameters.map((p) => (p.required ? `<${p.name}>` : `[${p.name}]`)).join(" ")
+                    ? cmd.parameters
+                        .map((p) => {
+                          const flag = p.flag ? p.flag : ""
+                          const label = p.label || p.name
+                          const expectsValue = p.input_type && p.input_type !== "boolean" && p.input_type !== "enum" ? ` ${label}` : flag && p.input_type === "enum" ? ` ${label}` : flag && !p.input_type ? ` ${label}` : p.input_type === "boolean" ? "" : ` ${label}`
+                          const text = flag ? `${flag}${expectsValue}` : label
+                          return p.required ? `<${text}>` : `[${text}]`
+                        })
+                        .join(" ")
                     : "-"}
                 </span>
                 <span className="w-20 text-blue-400 text-xs">{cmd.min_integrity}</span>

@@ -40,11 +40,14 @@
       "opsec": "safe",
       "parameters": [
         {
+          "input_type": "string",
           "name": "id",
-          "type": "string",
-          "default": "",
+          "description": "First 8 of agent id",
           "required": false,
-          "description": "First 8 items in the ID"
+          "label": "Agent id prefix",
+          "flag": "",
+          "type": "string",
+          "default": ""
         }
       ],
       "preview": "remove <id>",
@@ -60,18 +63,20 @@
       "opsec": "safe",
       "parameters": [
         {
+          "input_type": "string",
           "name": "param",
-          "type": "string",
-          "default": "",
+          "description": "Key to set (e.g., cb, jitter)",
           "required": false,
-          "description": "what param to set"
+          "label": "Parameter key",
+          "flag": ""
         },
         {
+          "input_type": "integer",
           "name": "value",
-          "type": "string",
-          "default": "",
-          "required": false,
-          "description": "what value to se to"
+          "description": "New value for the parameter",
+          "required": true,
+          "label": "Value",
+          "flag": ""
         }
       ],
       "preview": "set <param> <value>",
@@ -87,14 +92,23 @@
       "opsec": "unsafe",
       "parameters": [
         {
+          "input_type": "boolean",
           "name": "impersonate",
-          "type": "string",
-          "default": "-i",
+          "description": "Run under impersonation context (flag only)",
           "required": false,
-          "description": ""
+          "label": "Impersonate",
+          "flag": "-i"
+        },
+        {
+          "input_type": "string",
+          "name": "value",
+          "description": "Command text to execute",
+          "required": true,
+          "label": "Command to run",
+          "flag": ""
         }
       ],
-      "preview": "shell -i   <command>",
+      "preview": "shell [-i] <command>",
       "parser": "generic",
       "help": "",
       "cape": "Basics"

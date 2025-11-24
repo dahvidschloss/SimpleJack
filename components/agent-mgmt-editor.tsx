@@ -11,10 +11,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 type Param = {
   name: string
-  type: "string" | "boolean"
-  default: any
-  required: boolean
-  description: string
+  flag?: string
+  input_type?: "string" | "boolean" | "integer" | "path" | "enum" | "json"
+  choices?: string[]
+  type?: "string" | "boolean" // legacy fallback
+  default?: any
+  required?: boolean
+  description?: string
 }
 
 type Command = {
@@ -85,20 +88,24 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
   const addCommand = () => {
     setCommands(prev => ([
       ...prev,
-      { id: "new_command", name: "New Command", synopsis: "", min_integrity: "low", opsec: "safe", parameters: [], preview: "", parser: "generic", help: "" },
+      { id: "", name: "new_command", synopsis: "", min_integrity: "low", opsec: "safe", parameters: [], preview: "", parser: "generic", help: "" },
     ]))
   }
   const removeCommand = (idx: number) => setCommands(prev => prev.filter((_, i) => i !== idx))
   const updateCommand = (idx: number, patch: Partial<Command>) => setCommands(prev => prev.map((c, i) => i === idx ? { ...c, ...patch } : c))
-  const addParam = (idx: number) => setCommands(prev => prev.map((c, i) => i === idx ? { ...c, parameters: [...(c.parameters || []), { name: "param", type: "string", default: "", required: false, description: "" }] } : c))
+  const addParam = (idx: number) => setCommands(prev => prev.map((c, i) => i === idx ? { ...c, parameters: [...(c.parameters || []), { name: "param", flag: "", input_type: "string", default: "", required: false, description: "" }] } : c))
   const updateParam = (cmdIdx: number, pIdx: number, patch: Partial<Param>) => setCommands(prev => prev.map((c, i) => {
     if (i !== cmdIdx) return c
     const params = [...(c.parameters || [])]
     params[pIdx] = { ...params[pIdx], ...patch }
-    if (patch.hasOwnProperty('type')) {
-      const t = (patch as any).type
+    if (patch.name !== undefined) {
+      params[pIdx].label = patch.name // keep label in sync with name for display
+    }
+    const t = (patch as any).input_type ?? (patch as any).type
+    if (t) {
       if (t === 'boolean') params[pIdx].default = false
       if (t === 'string' && typeof params[pIdx].default !== 'string') params[pIdx].default = ""
+      if (t === 'integer') params[pIdx].default = Number.isFinite(params[pIdx].default) ? params[pIdx].default : 0
     }
     return { ...c, parameters: params }
   }))
@@ -111,7 +118,12 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
     setSavedOk(false)
     try {
       // Preserve the parser field as edited instead of forcing 'generic'
-      const payload = { commands }
+      const payload = {
+        commands: commands.map((c) => {
+          const id = c.id && c.id.trim().length > 0 ? c.id : c.name
+          return { ...c, id }
+        }),
+      }
       const res = await fetch(`/api/agent-mgmt/${encodeURIComponent(selected)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       if (!res.ok) throw new Error("Save failed (commands)")
       const infoRes = await fetch(`/api/agent-mgmt/agents/${encodeURIComponent(selected)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: agentLanguage, capes }) })
@@ -172,11 +184,14 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
                         <Badge variant="outline" className="text-[10px]">Command</Badge>
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-muted-foreground w-12">ID:</span>
-                          <Input value={cmd.id} onChange={(e) => updateCommand(idx, { id: e.target.value })} className="h-7 w-36 border border-primary" placeholder="id" />
+                          <Input value={cmd.id || cmd.name} readOnly className="h-7 w-36 border border-muted text-muted-foreground" placeholder="auto (uses name)" />
                         </div>
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-muted-foreground w-14">Name:</span>
-                          <Input value={cmd.name} onChange={(e) => updateCommand(idx, { name: e.target.value })} className="h-7 w-44 border border-primary" placeholder="name" />
+                          <Input value={cmd.name} onChange={(e) => {
+                            const val = e.target.value
+                            updateCommand(idx, { name: val, id: cmd.id ? cmd.id : val })
+                          }} className="h-7 w-44 border border-primary" placeholder="command word" />
                         </div>
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-muted-foreground w-20">Capability:</span>
@@ -216,24 +231,40 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
 
                   <div className="mb-3 border rounded-md border-[#f42c44] p-2">
                     <div className="text-xs font-medium mb-2">Parameters</div>
-                    {(cmd.parameters || []).map((p, pIdx) => (
+                    {(cmd.parameters || []).map((p, pIdx) => {
+                      const inputType = p.input_type || p.type || "string"
+                      const isBoolean = inputType === "boolean"
+                      const isEnum = inputType === "enum"
+                      const isInteger = inputType === "integer"
+                      const choicesText = (p.choices || []).join(",")
+                      return (
                       <div key={pIdx} className="mb-2 pb-2 border-b border-border last:border-b-0 last:pb-0">
                         <div className="flex items-center gap-3 flex-wrap">
                           <div className="flex items-center gap-1">
-                            <span className="text-xs text-muted-foreground">Name:</span>
-                            <Input value={p.name} onChange={(e) => updateParam(idx, pIdx, { name: e.target.value })} className="h-7 w-40 border border-primary" placeholder="name" />
+                            <span className="text-xs text-muted-foreground">Parameter:</span>
+                            <Input value={p.name} onChange={(e) => updateParam(idx, pIdx, { name: e.target.value })} className="h-7 w-40 border border-primary" placeholder="e.g. command, file" />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">Flag:</span>
+                            <Input value={p.flag || ""} onChange={(e) => updateParam(idx, pIdx, { flag: e.target.value })} className="h-7 w-28 border border-primary" placeholder="-i or --input" />
+                            <span className="text-[10px] text-muted-foreground ml-1">Leave blank for positional value</span>
                           </div>
                           <div className="flex items-center gap-1">
                             <span className="text-xs text-muted-foreground">Type:</span>
-                            <Select value={p.type} onValueChange={(v) => updateParam(idx, pIdx, { type: v as any })}>
+                            <Select value={inputType} onValueChange={(v) => updateParam(idx, pIdx, { input_type: v as any, type: v as any })}>
                               <SelectTrigger className="h-7 w-28 border border-primary"><SelectValue /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="string">string</SelectItem>
                                 <SelectItem value="boolean">boolean</SelectItem>
+                                <SelectItem value="integer">integer</SelectItem>
+                                <SelectItem value="path">path</SelectItem>
+                                <SelectItem value="enum">enum</SelectItem>
+                                <SelectItem value="json">json</SelectItem>
                               </SelectContent>
                             </Select>
+                            <span className="text-[10px] text-muted-foreground ml-1">{isBoolean ? "Flag only (no value)" : "Expects a value"}</span>
                           </div>
-                          {p.type === 'boolean' ? (
+                          {isBoolean ? (
                             <div className="flex items-center gap-1">
                               <span className="text-xs text-muted-foreground">Default:</span>
                               <Switch className="border border-border rounded-full" checked={!!p.default} onCheckedChange={(v) => updateParam(idx, pIdx, { default: v })} />
@@ -241,7 +272,21 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
                           ) : (
                             <div className="flex items-center gap-1">
                               <span className="text-xs text-muted-foreground">Default:</span>
-                              <Input value={String(p.default ?? '')} onChange={(e) => updateParam(idx, pIdx, { default: e.target.value })} className="h-7 w-40 border border-primary" placeholder="default" />
+                              <Input
+                                value={
+                                  isInteger
+                                    ? String(Number.isFinite(p.default) ? p.default : "")
+                                    : isEnum
+                                      ? String(p.default ?? "")
+                                      : String(p.default ?? "")
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  updateParam(idx, pIdx, { default: isInteger ? (val === "" ? "" : Number(val)) : val })
+                                }}
+                                className="h-7 w-40 border border-primary"
+                                placeholder={isInteger ? "0" : "default"}
+                              />
                             </div>
                           )}
                           <div className="flex items-center gap-1">
@@ -250,12 +295,18 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
                           </div>
                           <Button size="sm" variant="destructive" className="h-7 px-2" onClick={() => removeParam(idx, pIdx)}>X</Button>
                         </div>
+                        {isEnum && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-20">Choices (comma):</span>
+                            <Input value={choicesText} onChange={(e) => updateParam(idx, pIdx, { choices: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} className="h-7 flex-1 border border-primary" placeholder="foo,bar,baz" />
+                          </div>
+                        )}
                         <div className="mt-2 flex items-center gap-2">
                           <span className="text-xs text-muted-foreground w-20">Description:</span>
                           <Input value={p.description} onChange={(e) => updateParam(idx, pIdx, { description: e.target.value })} className="h-7 flex-1 border border-primary" placeholder="description" />
                         </div>
                       </div>
-                    ))}
+                    )})}
                     <Button size="sm" variant="outline" onClick={() => addParam(idx)}>Add Parameter</Button>
                   </div>
 
@@ -263,7 +314,15 @@ export function AgentMgmtEditor({ selected }: { selected: string | null }) {
                     <span className="text-xs text-muted-foreground w-16">Preview:</span>
                     <Input value={cmd.preview} onChange={(e) => updateCommand(idx, { preview: e.target.value })} className="h-7 flex-1 border border-primary" placeholder="preview" />
                     <span className="text-xs text-muted-foreground w-16">Parser:</span>
-                    <Input value={cmd.parser || 'generic'} onChange={(e) => updateCommand(idx, { parser: e.target.value })} className="h-7 w-40 border border-primary" placeholder="parser (generic)" />
+                    <Select value={cmd.parser || "generic"} onValueChange={(v) => updateCommand(idx, { parser: v as any })}>
+                      <SelectTrigger className="h-7 w-40 border border-primary"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="generic">generic</SelectItem>
+                        <SelectItem value="boolean">boolean</SelectItem>
+                        <SelectItem value="file">file</SelectItem>
+                        <SelectItem value="process">process</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground w-20">Description:</span>
