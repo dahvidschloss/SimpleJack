@@ -2,11 +2,22 @@
 // Reads active listeners from c2.db and starts simple servers on localhost
 /* eslint-disable @typescript-eslint/no-var-requires */
 const Database = require('better-sqlite3')
+const { readFileSync } = require('fs')
+const { join } = require('path')
 
 const db = new Database('c2.db')
 const http = require('http')
 
 const CONTROL_PORT = 47791 // localhost-only control channel
+
+function initializeDatabase() {
+  try {
+    const schema = readFileSync(join(__dirname, 'init-database.sql'), 'utf8')
+    db.exec(schema)
+  } catch (err) {
+    console.error('[listeners] Failed to initialize database schema', err)
+  }
+}
 
 function getActiveListeners() {
   const stmt = db.prepare("SELECT * FROM listeners WHERE status = 'active'")
@@ -103,6 +114,8 @@ async function main() {
     }
     lastActive = active
   }
+
+  initializeDatabase()
 
   await sync()
   console.log('[listeners] Watching database for changes ...')
