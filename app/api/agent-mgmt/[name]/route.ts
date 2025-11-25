@@ -64,13 +64,13 @@ const DEFAULT_COMMANDS = {
           type: "string",
           default: "",
           required: true,
-          description: "first 8 charaters of the Agent ID",
+          description: "first 8 charaters of the Agent ID, or 'dead' to purge offline agents",
         },
       ],
-      preview: "remove <id>",
+      preview: "remove <id|dead>",
       parser: "generic",
       help:
-        "Removes the agent from the listing and databse. DOES NOT FORCE EAT!",
+        "Removes the agent from the listing and databse. Use 'dead' to clear all offline agents. DOES NOT FORCE EAT!",
     },
   ],
 }
@@ -108,4 +108,3 @@ export async function PUT(req: NextRequest, { params }: { params: { name: string
 }
 
 export const dynamic = "force-dynamic"
-

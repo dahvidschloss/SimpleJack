@@ -898,6 +898,54 @@ export function TerminalInterface({ selectedAgent, agents }: TerminalInterfacePr
       }
       const current = getCurrentAgent()
       const arg = (args[0] || "").toLowerCase()
+      if (arg === "dead") {
+        const offlineAgents = agents.filter((a) => a.status === "offline")
+        if (offlineAgents.length === 0) {
+          const out: TerminalLine = {
+            id: (Date.now() + 1).toString(),
+            type: "output",
+            content: "No offline agents to remove",
+            timestamp: commandLine.timestamp,
+          }
+          setHistory((prev) => [...prev, commandLine, out])
+          setCommand("")
+          return
+        }
+        try {
+          const res = await fetch(`/api/agents?status=offline`, { method: "DELETE" })
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}))
+            const removed = typeof data?.removed === "number" ? data.removed : offlineAgents.length
+            const attempted = typeof data?.attempted === "number" ? data.attempted : offlineAgents.length
+            const out: TerminalLine = {
+              id: (Date.now() + 1).toString(),
+              type: "output",
+              content: `Removed ${removed}/${attempted} offline agents`,
+              timestamp: commandLine.timestamp,
+            }
+            setHistory((prev) => [...prev, commandLine, out])
+            window.dispatchEvent(new CustomEvent("agents:refresh"))
+          } else {
+            const out: TerminalLine = {
+              id: (Date.now() + 1).toString(),
+              type: "error",
+              content: "Failed to remove offline agents",
+              timestamp: commandLine.timestamp,
+            }
+            setHistory((prev) => [...prev, commandLine, out])
+          }
+        } catch {
+          const out: TerminalLine = {
+            id: (Date.now() + 1).toString(),
+            type: "error",
+            content: "Error removing offline agents",
+            timestamp: commandLine.timestamp,
+          }
+          setHistory((prev) => [...prev, commandLine, out])
+        }
+        setCommand("")
+        return
+      }
       if (!current || !arg || !current.id.toLowerCase().startsWith(arg)) {
         const out: TerminalLine = {
           id: (Date.now() + 1).toString(),

@@ -179,6 +179,12 @@ export const agentDb = {
     return info.changes > 0
   },
 
+  deleteByStatus: (status: Agent["status"]): number => {
+    const stmt = db.prepare("DELETE FROM agents WHERE status = ?")
+    const info = stmt.run(status)
+    return info.changes
+  },
+
   getBySessionKey: (sessionKey: string): Agent | null => {
     const stmt = db.prepare("SELECT * FROM agents WHERE session_key = ?")
     return stmt.get(sessionKey) as Agent | null

@@ -24,3 +24,6 @@ yarn-error.log*
 next-env.d.ts
 
 c2.db
+Agents/toliet_oracle/toilet_oracle.ps1
+Agents/NotVodka/agent.json
+public/data/commands/NotVodka.json
